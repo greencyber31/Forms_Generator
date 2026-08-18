@@ -142,6 +142,41 @@ def _get_farmer_val(farmer: dict, tag_key: str, mapping: dict | None = None) -> 
 
     return ""
 
+def _calculate_smart_column_widths(active_cols: list[dict], farmers_list: list[dict], total_width_mm: float = 160.0) -> list[float]:
+    """
+    Calculates content-aware column widths based on header length and max data row text length.
+    Ensures short columns (Gender, Suffix, ID) take less space and long columns (Names, Address, Contact) get more space.
+    Strictly normalizes all column widths so their sum is EXACTLY equal to total_width_mm (160mm),
+    preventing any table overflow beyond the A4 page margins.
+    """
+    if not active_cols:
+        return []
+
+    scores = []
+    for col_info in active_cols:
+        h_name = str(col_info.get("header", ""))
+        max_char_len = max(len(h_name), 4)
+
+        for farmer in farmers_list[:50]:
+            val = _get_farmer_val(farmer, h_name, None)
+            if val:
+                max_char_len = max(max_char_len, min(len(str(val)), 30))
+
+        scores.append(max_char_len ** 0.85)
+
+    total_score = sum(scores)
+    if total_score <= 0:
+        total_score = 1.0
+
+    raw_widths = [(score / total_score) * total_width_mm for score in scores]
+    min_col_mm = max(10.0, total_width_mm / (len(active_cols) * 2.5))
+    floored_widths = [max(w, min_col_mm) for w in raw_widths]
+
+    floored_sum = sum(floored_widths)
+    final_widths = [(w / floored_sum) * total_width_mm for w in floored_widths]
+
+    return final_widths
+
 def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_mapping: dict | None = None, transmittal_columns: list[dict] | None = None):
     if not farmers_list:
         return
@@ -182,8 +217,10 @@ def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_map
 
     if active_cols:
         target_count = len(active_cols)
+        col_widths_mm = _calculate_smart_column_widths(active_cols, farmers_list, total_width_mm=160.0)
+
         while len(table.columns) < target_count:
-            table.add_column(Mm(160 / target_count))
+            table.add_column(Mm(col_widths_mm[min(len(table.columns), target_count - 1)]))
 
         header_cells = table.rows[header_row_idx].cells
         for col_i, col_info in enumerate(active_cols):
@@ -229,6 +266,12 @@ def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_map
                                 r.font.size = fmt['size']
                             if fmt['bold'] is not None:
                                 r.bold = fmt['bold']
+
+        # Enforce exact smart width on every row & cell to maintain strict A4 margins (160mm total)
+        for row in table.rows:
+            for col_i, w_mm in enumerate(col_widths_mm):
+                if col_i < len(row.cells):
+                    row.cells[col_i].width = Mm(w_mm)
 
         _ensure_table_borders(table)
         return
