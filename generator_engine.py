@@ -89,6 +89,91 @@ def _ensure_table_borders(table):
     except Exception:
         pass
 
+def populate_transmittal_table(docx_obj, farmers: list[dict]):
+    """Injects and formats farmers list into the first table of a transmittal document."""
+    if not farmers or not docx_obj.tables:
+        return
+    table = docx_obj.tables[0]
+    TABLE_WIDTH_MM = 160
+    table.width = Mm(TABLE_WIDTH_MM)
+
+    header_row_idx = 0
+    sample_row_idx = 1 if len(table.rows) > 1 else 0
+
+    try:
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        row0_texts = set([c.text.strip() for c in table.rows[0].cells])
+        if len(row0_texts) == 1 and len(table.rows) > 2:
+            header_row_idx = 1
+            sample_row_idx = 2
+            header_row_indices = [0, 1]
+        else:
+            header_row_indices = [0]
+
+        for r_idx in header_row_indices:
+            trPr = table.rows[r_idx]._tr.get_or_add_trPr()
+            if trPr.find(qn('w:tblHeader')) is None:
+                trPr.append(OxmlElement('w:tblHeader'))
+    except Exception:
+        pass
+
+    headers_in_table = [c.text.strip().lower() for c in table.rows[header_row_idx].cells]
+    has_sample_row = len(table.rows) > sample_row_idx
+    col_formats = []
+    for col_idx in range(len(table.columns)):
+        fmt = {'name': None, 'size': None, 'bold': None}
+        try:
+            cell = table.cell(sample_row_idx, col_idx)
+            if cell.paragraphs and cell.paragraphs[0].runs:
+                r = cell.paragraphs[0].runs[0]
+                fmt['name'] = r.font.name
+                fmt['size'] = r.font.size
+                fmt['bold'] = r.bold if has_sample_row else False
+        except Exception:
+            pass
+        col_formats.append(fmt)
+
+    for i, farmer in enumerate(farmers):
+        if i == 0 and has_sample_row:
+            row_cells = table.rows[sample_row_idx].cells
+        else:
+            row_cells = table.add_row().cells
+
+        for col_i, header_name in enumerate(headers_in_table):
+            if col_i >= len(row_cells):
+                break
+            val = ""
+            if 'barangay' in header_name or 'brgy' in header_name:
+                val = str(farmer.get('Barangay', ''))
+            elif 'name' in header_name:
+                val = str(farmer.get('Full_Name', ''))
+            elif 'birth' in header_name or 'bday' in header_name or 'date' in header_name:
+                val = str(farmer.get('Birthday', ''))
+            elif 'gender' in header_name or 'sex' in header_name:
+                val = str(farmer.get('Gender', ''))
+            elif 'ref' in header_name or 'id' in header_name or 'no' in header_name:
+                val = str(farmer.get('Reference_No', ''))
+            else:
+                val = str(farmer.get('Full_Name', ''))
+            
+            row_cells[col_i].text = val
+
+        for col_idx, cell in enumerate(row_cells):
+            if col_idx < len(col_formats):
+                fmt = col_formats[col_idx]
+                for p in cell.paragraphs:
+                    for r in p.runs:
+                        if fmt['name']:
+                            r.font.name = fmt['name']
+                        if fmt['size']:
+                            r.font.size = fmt['size']
+                        if fmt['bold'] is not None:
+                            r.bold = fmt['bold']
+
+    _ensure_table_borders(table)
+
 def _generate_one_pdf(args: tuple):
     """
     Worker function (runs in a separate process):
@@ -121,94 +206,8 @@ def _generate_one_pdf(args: tuple):
             section.page_height = Mm(297)
             
         # Transmittal list table injection if farmers array is present
-        if 'farmers' in context and doc.docx.tables:
-            table = doc.docx.tables[0]
-            TABLE_WIDTH_MM = 160
-            table.width = Mm(TABLE_WIDTH_MM)
-
-            # Enable repeating header rows across pages in Word/PDF
-            header_row_idx = 0
-            sample_row_idx = 1 if len(table.rows) > 1 else 0
-
-            try:
-                from docx.oxml import OxmlElement
-                from docx.oxml.ns import qn
-
-                # Determine if row 0 is merged title row
-                row0_texts = set([c.text.strip() for c in table.rows[0].cells])
-                if len(row0_texts) == 1 and len(table.rows) > 2:
-                    header_row_idx = 1
-                    sample_row_idx = 2
-                    header_row_indices = [0, 1]
-                else:
-                    header_row_indices = [0]
-
-                for r_idx in header_row_indices:
-                    trPr = table.rows[r_idx]._tr.get_or_add_trPr()
-                    if trPr.find(qn('w:tblHeader')) is None:
-                        trPr.append(OxmlElement('w:tblHeader'))
-            except Exception:
-                pass
-
-            # Dynamically inspect column headers from header_row_idx
-            headers_in_table = [c.text.strip().lower() for c in table.rows[header_row_idx].cells]
-
-            has_sample_row = len(table.rows) > sample_row_idx
-            col_formats = []
-            for col_idx in range(len(table.columns)):
-                fmt = {'name': None, 'size': None, 'bold': None}
-                try:
-                    cell = table.cell(sample_row_idx, col_idx)
-                    if cell.paragraphs and cell.paragraphs[0].runs:
-                        r = cell.paragraphs[0].runs[0]
-                        fmt['name'] = r.font.name
-                        fmt['size'] = r.font.size
-                        fmt['bold'] = r.bold if has_sample_row else False
-                except Exception:
-                    pass
-                col_formats.append(fmt)
-
-            for i, farmer in enumerate(context['farmers']):
-                if i == 0 and has_sample_row:
-                    row_cells = table.rows[sample_row_idx].cells
-                else:
-                    row_cells = table.add_row().cells
-
-                # Dynamically assign values based on header names
-                for col_i, header_name in enumerate(headers_in_table):
-                    if col_i >= len(row_cells):
-                        break
-                    val = ""
-                    if 'barangay' in header_name or 'brgy' in header_name:
-                        val = str(farmer.get('Barangay', farmer.get('Group_Bundle', '')))
-                    elif 'name' in header_name:
-                        val = str(farmer.get('Full_Name', farmer.get('Name', '')))
-                    elif 'birth' in header_name or 'bday' in header_name:
-                        val = str(farmer.get('Birthday', farmer.get('Birthdate', '')))
-                    elif 'gender' in header_name or 'sex' in header_name:
-                        val = str(farmer.get('Gender', ''))
-                    elif 'ref' in header_name or 'id' in header_name or 'no' in header_name:
-                        val = str(farmer.get('Reference_No', farmer.get('ID', '')))
-                    else:
-                        val = str(farmer.get('Full_Name', ''))
-                    
-                    row_cells[col_i].text = val
-
-                # Format cells to match sample row styling
-                for col_idx, cell in enumerate(row_cells):
-                    if col_idx < len(col_formats):
-                        fmt = col_formats[col_idx]
-                        for p in cell.paragraphs:
-                            for r in p.runs:
-                                if fmt['name']:
-                                    r.font.name = fmt['name']
-                                if fmt['size']:
-                                    r.font.size = fmt['size']
-                                if fmt['bold'] is not None:
-                                    r.bold = fmt['bold']
-
-            # Enforce clean solid grid borders on transmittal table
-            _ensure_table_borders(table)
+        if 'farmers' in context:
+            populate_transmittal_table(doc.docx, context['farmers'])
 
         doc.save(temp_docx_path)
 
@@ -336,13 +335,38 @@ def run_batch_generation(
         # 1. Transmittal Data
         farmers_list = []
         for _, row in group_df.iterrows():
-            ctx = _build_context(row.to_dict(), transmittal_mapping)
+            r_d = row.to_dict()
+            ctx = _build_context(r_d, transmittal_mapping)
+
+            def find_val(candidates):
+                for c in candidates:
+                    if c in ctx and ctx[c]:
+                        return ctx[c]
+                    s_c = sanitize_key(c)
+                    if s_c in ctx and ctx[s_c]:
+                        return ctx[s_c]
+                    for r_k, r_v in r_d.items():
+                        if str(r_k).strip().lower() == c.lower() and pd.notna(r_v) and str(r_v).strip():
+                            return str(r_v).strip()
+                return ""
+
+            fn = find_val(['Full_Name', 'Full Name', 'Farmer Name', 'Name', 'Farmer_Name'])
+            if not fn:
+                fname = find_val(['First Name', 'First_Name', 'Fname'])
+                lname = find_val(['Last Name', 'Last_Name', 'Lname'])
+                if fname or lname:
+                    fn = f"{lname}, {fname}".strip(', ')
+
+            bd = find_val(['Birth_Date', 'Birthdate', 'Birthday', 'Birth Date', 'DOB', 'Bday'])
+            gen = find_val(['Gender', 'Sex'])
+            ref = find_val(['Reference_No', 'Reference No.', 'Reference No', 'Ref No', 'Farmer ID', 'Farmer_ID', 'ID'])
+
             farmers_list.append({
                 'Barangay': brgy_name,
-                'Full_Name': ctx.get('Full_Name', ctx.get('Fullname', '')),
-                'Birthday': ctx.get('Birthdate', ctx.get('Birth_Date', '')),
-                'Gender': ctx.get('Gender', ''),
-                'Reference_No': ctx.get('Reference_No', ctx.get('Reference_No.', ''))
+                'Full_Name': fn,
+                'Birthday': str(bd) if bd else '',
+                'Gender': str(gen) if gen else '',
+                'Reference_No': str(ref) if ref else ''
             })
 
         # 2. Submit Transmittal Job

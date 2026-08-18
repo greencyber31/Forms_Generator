@@ -43,6 +43,7 @@ def extract_docx_tags(docx_path: str) -> list[str]:
                     seen.add(tag)
                     found_tags.append(tag)
 
+        # 1. Body paragraphs & tables
         for element in doc.element.body:
             if element.tag.endswith('p'):
                 p = docx.text.paragraph.Paragraph(element, doc)
@@ -53,6 +54,25 @@ def extract_docx_tags(docx_path: str) -> list[str]:
                     for cell in row.cells:
                         for cell_p in cell.paragraphs:
                             extract_text_tags(cell_p.text)
+
+        # 2. Section headers & footers
+        for section in doc.sections:
+            if section.header:
+                for p in section.header.paragraphs:
+                    extract_text_tags(p.text)
+                for t in section.header.tables:
+                    for row in t.rows:
+                        for cell in row.cells:
+                            for cell_p in cell.paragraphs:
+                                extract_text_tags(cell_p.text)
+            if section.footer:
+                for p in section.footer.paragraphs:
+                    extract_text_tags(p.text)
+                for t in section.footer.tables:
+                    for row in t.rows:
+                        for cell in row.cells:
+                            for cell_p in cell.paragraphs:
+                                extract_text_tags(cell_p.text)
 
         return found_tags
     except Exception as e:
@@ -165,19 +185,20 @@ def render_sample_pdf_preview(
     output_name: str
 ) -> str:
     """
-    Renders sample Row 1 data from Excel into the Word template using docxtpl,
+    Renders sample data from Excel into the Word template using docxtpl,
     then converts to PDF for live 1:1 previewing in the browser.
     """
     try:
         docx_tags = extract_docx_tags(docx_path)
         context = {tag: "" for tag in docx_tags}
 
+        df_sample = None
         row_dict = {}
         if excel_path and os.path.exists(excel_path):
             try:
-                df = pd.read_excel(excel_path, nrows=1)
-                if not df.empty:
-                    row_dict = df.iloc[0].to_dict()
+                df_sample = pd.read_excel(excel_path, nrows=5)
+                if not df_sample.empty:
+                    row_dict = df_sample.iloc[0].to_dict()
             except Exception:
                 pass
 
@@ -190,9 +211,47 @@ def render_sample_pdf_preview(
                     val = row_dict[mapped_val]
                     context[tag] = str(val) if pd.notna(val) else ""
 
+        # Build sample farmers if rendering transmittal template
+        if 'transmittal' in output_name.lower() or 'transmittal' in docx_path.lower():
+            farmers = []
+            if df_sample is not None and not df_sample.empty:
+                for _, s_row in df_sample.iterrows():
+                    r_d = s_row.to_dict()
+                    def find_val(candidates):
+                        for c in candidates:
+                            for r_k, r_v in r_d.items():
+                                if str(r_k).strip().lower() == c.lower() and pd.notna(r_v) and str(r_v).strip():
+                                    return str(r_v).strip()
+                        return ""
+                    
+                    fn = find_val(['Full Name', 'Full_Name', 'Farmer Name', 'Name'])
+                    if not fn:
+                        fname = find_val(['First Name', 'First_Name'])
+                        lname = find_val(['Last Name', 'Last_Name'])
+                        if fname or lname:
+                            fn = f"{lname}, {fname}".strip(', ')
+                    
+                    bd = find_val(['Birth Date', 'Birth_Date', 'Birthdate', 'Birthday', 'DOB', 'Bday'])
+                    if bd and hasattr(s_row.get('Birth Date', ''), 'strftime'):
+                        bd = s_row.get('Birth Date').strftime('%m/%d/%Y')
+                    
+                    farmers.append({
+                        'Barangay': find_val(['Barangay', 'Brgy']),
+                        'Full_Name': fn or 'DELA CRUZ, JUAN A.',
+                        'Birthday': str(bd) if bd else '01/01/1980',
+                        'Gender': find_val(['Gender', 'Sex']) or 'Male',
+                        'Reference_No': find_val(['Reference No.', 'Reference No', 'Reference_No', 'Farmer ID', 'ID']) or 'REF-00001'
+                    })
+            context['farmers'] = farmers
+
         tpl = DocxTemplate(docx_path)
         tpl.render(context)
-        
+
+        # Inject sample table rows if farmers context exists
+        if 'farmers' in context and tpl.docx.tables:
+            from generator_engine import populate_transmittal_table
+            populate_transmittal_table(tpl.docx, context['farmers'])
+
         out_dir = Path(temp_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         filled_docx = out_dir / f"{output_name}_sample.docx"
@@ -201,3 +260,4 @@ def render_sample_pdf_preview(
         return render_docx_to_pdf_preview(str(filled_docx), temp_dir, output_name)
     except Exception as e:
         raise ValueError(f"Failed to render sample PDF preview: {str(e)}")
+
