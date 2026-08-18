@@ -970,7 +970,7 @@ body {
 }
 
 .col-order-input {
-    width: 60px;
+    width: 55px;
     background: var(--bg-input);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
@@ -980,6 +980,51 @@ body {
     padding: 0.25rem 0.4rem;
     outline: none;
     font-size: 0.88rem;
+}
+
+.col-order-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-left: 0.2rem;
+}
+
+.btn-order-move {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    font-size: 0.75rem;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.btn-order-up {
+    background: #3b82f6;
+    color: #ffffff;
+    border: 1px solid #60a5fa;
+}
+
+.btn-order-up:hover {
+    background: #2563eb;
+    transform: translateY(-1px);
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+}
+
+.btn-order-down {
+    background: #ef4444;
+    color: #ffffff;
+    border: 1px solid #f87171;
+}
+
+.btn-order-down:hover {
+    background: #dc2626;
+    transform: translateY(1px);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
 }
 
 .col-order-input:focus {

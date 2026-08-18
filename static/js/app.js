@@ -268,6 +268,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const listEl = container.querySelector('#trans-columns-list');
 
+            function reindexAndSave() {
+                let currentPos = 1;
+                listEl.querySelectorAll('.trans-col-item').forEach(el => {
+                    const chk = el.querySelector('.trans-col-checkbox');
+                    const inp = el.querySelector('.col-order-input');
+                    if (chk.checked) {
+                        inp.value = currentPos++;
+                    }
+                });
+                saveTransmittalColumns();
+            }
+
             columns.forEach(col => {
                 const item = document.createElement('div');
                 item.className = `trans-col-item ${col.enabled ? 'selected' : 'disabled'}`;
@@ -281,11 +293,37 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="col-order-box">
                         <span class="order-label">Col Position:</span>
                         <input type="number" min="1" max="99" class="col-order-input" value="${col.order || ''}" placeholder="#" />
+                        <div class="col-order-nav">
+                            <button type="button" class="btn-order-move btn-order-up" title="Move Up"><i class="fa-solid fa-circle-arrow-up"></i></button>
+                            <button type="button" class="btn-order-move btn-order-down" title="Move Down"><i class="fa-solid fa-circle-arrow-down"></i></button>
+                        </div>
                     </div>
                 `;
 
                 const chk = item.querySelector('.trans-col-checkbox');
                 const ordInput = item.querySelector('.col-order-input');
+                const btnUp = item.querySelector('.btn-order-up');
+                const btnDown = item.querySelector('.btn-order-down');
+
+                btnUp.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const prev = item.previousElementSibling;
+                    if (prev) {
+                        listEl.insertBefore(item, prev);
+                        reindexAndSave();
+                    }
+                });
+
+                btnDown.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const next = item.nextElementSibling;
+                    if (next) {
+                        listEl.insertBefore(next, item);
+                        reindexAndSave();
+                    }
+                });
 
                 chk.addEventListener('change', () => {
                     item.className = `trans-col-item ${chk.checked ? 'selected' : 'disabled'}`;
