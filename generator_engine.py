@@ -162,21 +162,18 @@ def _calculate_smart_column_widths(active_cols: list[dict], farmers_list: list[d
             if val:
                 max_val_len = max(max_val_len, len(str(val)))
 
-        # Priority 1: Single char / short code fields (Gender, Sex, Suffix)
-        if (max_val_len <= 3 and ('gender' in h_clean or 'sex' in h_clean or 'suffix' in h_clean)) or h_clean in {'m/f', 'g', 'sex'}:
-            score = 4.5
-        # Priority 2: Hyphenated Reference / RSBSA / ID codes (e.g. 10-13-02-017-000405 = 19 chars)
+        effective_len = max(max_val_len, len(h_name))
+
+        if 'gender' in h_clean or 'sex' in h_clean or 'suffix' in h_clean:
+            score = 6.0
         elif 'ref' in h_clean or 'rsbsa' in h_clean or 'id' in h_clean or max_val_len >= 16:
-            score = max(max_val_len, 18) * 1.85
-        # Priority 3: Dates (05/24/1991 = 10 chars)
+            score = 19.0  # Cap score for Reference No so it gets ~38-40mm
         elif 'date' in h_clean or 'birth' in h_clean:
-            score = 10.0 * 1.05
-        # Priority 4: Municipality / Barangay (Data length is short e.g. DAMULOG, SAMPAGAR)
-        elif 'muni' in h_clean or 'brgy' in h_clean or 'barangay' in h_clean or 'town' in h_clean:
-            score = max(max_val_len, 7) * 1.1
-        # Priority 5: Standard Names / Text
+            score = 9.0   # ~18mm for Date
+        elif 'name' in h_clean or 'last' in h_clean or 'first' in h_clean or 'middle' in h_clean:
+            score = max(effective_len, 12) * 1.25 # Generous ~24-26mm for Names
         else:
-            score = max(max_val_len, len(h_name), 8) * 1.25
+            score = max(effective_len, 8) * 1.05
 
         scores.append(score)
 
@@ -190,13 +187,17 @@ def _calculate_smart_column_widths(active_cols: list[dict], farmers_list: list[d
     for idx, col_info in enumerate(active_cols):
         h_clean = str(col_info.get("header", "")).lower().strip()
         w = raw_widths[idx]
-        if 'gender' in h_clean or 'sex' in h_clean or 'suffix' in h_clean or h_clean in {'m/f', 'g'}:
-            w = min(w, 10.5)
-            w = max(w, 7.5)
+        if 'gender' in h_clean or 'sex' in h_clean or 'suffix' in h_clean:
+            w = min(w, 12.0)
+            w = max(w, 10.0)
         elif 'ref' in h_clean or 'rsbsa' in h_clean:
-            w = max(w, 34.0)
+            w = min(w, 40.0)
+            w = max(w, 35.0)
         elif 'date' in h_clean or 'birth' in h_clean:
-            w = max(w, 16.5)
+            w = min(w, 20.0)
+            w = max(w, 17.0)
+        elif 'name' in h_clean:
+            w = max(w, 22.0)
         final_widths.append(w)
 
     final_sum = sum(final_widths)
@@ -207,8 +208,7 @@ def _calculate_smart_column_widths(active_cols: list[dict], farmers_list: list[d
 def _apply_xml_table_column_widths(table, col_widths_mm: list[float]):
     """
     Rebuilds the Word document XML <w:tblGrid> and <w:tcW> for every cell in every row.
-    This forces Microsoft Word and LibreOffice to strictly honor dynamic column widths 
-    rather than rendering the original hardcoded table grid from the .docx template file.
+    Also tightens cell margins (tcMar) to 1mm so text has maximum horizontal room without wrapping.
     """
     if not col_widths_mm:
         return
@@ -226,18 +226,32 @@ def _apply_xml_table_column_widths(table, col_widths_mm: list[float]):
         gridCol.set(qn('w:w'), str(dxa))
         tblGrid.append(gridCol)
 
-    # 2. Update <w:tcW> for every row & cell
+    # 2. Update <w:tcW> and set tight cell padding on every cell
     for row in table.rows:
         for col_idx, dxa in enumerate(widths_dxa):
             if col_idx < len(row.cells):
                 cell = row.cells[col_idx]
                 tcPr = cell._tc.get_or_add_tcPr()
+                
                 tcW = tcPr.find(qn('w:tcW'))
                 if tcW is None:
                     tcW = OxmlElement('w:tcW')
                     tcPr.append(tcW)
                 tcW.set(qn('w:w'), str(dxa))
                 tcW.set(qn('w:type'), 'dxa')
+
+                # Tighten cell padding (left/right margins) to 60 dxa (~1mm)
+                tcMar = tcPr.find(qn('w:tcMar'))
+                if tcMar is None:
+                    tcMar = OxmlElement('w:tcMar')
+                    tcPr.append(tcMar)
+                for margin_name in ['left', 'right']:
+                    node = tcMar.find(qn(f'w:{margin_name}'))
+                    if node is None:
+                        node = OxmlElement(f'w:{margin_name}')
+                        tcMar.append(node)
+                    node.set(qn('w:w'), '60')
+                    node.set(qn('w:type'), 'dxa')
 
 def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_mapping: dict | None = None, transmittal_columns: list[dict] | None = None):
     if not farmers_list:
