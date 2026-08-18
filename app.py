@@ -30,8 +30,49 @@ workspace_state = {
     "mappings": {
         "template": {},
         "transmittal": {}
-    }
+    },
+    "transmittal_columns": []
 }
+
+def build_default_transmittal_columns(headers):
+    raw_headers = [h["original"] if isinstance(h, dict) else str(h) for h in headers]
+    defaults = [
+        ['last name', 'surname', 'lname'],
+        ['first name', 'fname'],
+        ['middle name', 'middlename', 'mname'],
+        ['birth date', 'birthdate', 'birthday', 'dob', 'bday'],
+        ['gender', 'sex'],
+        ['reference no', 'reference no.', 'cfitf no', 'farmer id', 'ref no']
+    ]
+    col_items = []
+    used_indices = set()
+    order_counter = 1
+
+    for def_candidates in defaults:
+        for idx, h in enumerate(raw_headers):
+            if idx in used_indices:
+                continue
+            h_clean = h.strip().lower().replace('.', '').replace('_', ' ')
+            if any(cand in h_clean for cand in def_candidates):
+                col_items.append({
+                    "header": h,
+                    "enabled": True,
+                    "order": order_counter
+                })
+                used_indices.add(idx)
+                order_counter += 1
+                break
+
+    for idx, h in enumerate(raw_headers):
+        if idx not in used_indices:
+            col_items.append({
+                "header": h,
+                "enabled": False,
+                "order": order_counter
+            })
+            order_counter += 1
+
+    return col_items
 
 def init_workspace():
     excel_path = "CFITF Farmers.xlsx"
@@ -44,6 +85,7 @@ def init_workspace():
         workspace_state["excel_file"] = os.path.abspath(excel_path)
         try:
             workspace_state["headers"] = extract_excel_headers(excel_path)
+            workspace_state["transmittal_columns"] = build_default_transmittal_columns(workspace_state["headers"])
         except Exception:
             pass
 
@@ -80,7 +122,8 @@ def get_workspace():
         "headers": workspace_state["headers"],
         "app_docx_tags": workspace_state["app_docx_tags"],
         "trans_docx_tags": workspace_state["trans_docx_tags"],
-        "mappings": workspace_state["mappings"]
+        "mappings": workspace_state["mappings"],
+        "transmittal_columns": workspace_state["transmittal_columns"]
     })
 
 @app.route('/api/upload', methods=['POST'])
@@ -102,6 +145,7 @@ def upload_file():
     if file_type == 'excel':
         workspace_state["excel_file"] = save_path
         workspace_state["headers"] = extract_excel_headers(save_path)
+        workspace_state["transmittal_columns"] = build_default_transmittal_columns(workspace_state["headers"])
         excel_raw_headers = [h["original"] for h in workspace_state["headers"]]
         # Re-run auto-match with new excel headers
         if workspace_state["template_file"]:
@@ -129,7 +173,8 @@ def upload_file():
             "headers": workspace_state["headers"],
             "app_docx_tags": workspace_state["app_docx_tags"],
             "trans_docx_tags": workspace_state["trans_docx_tags"],
-            "mappings": workspace_state["mappings"]
+            "mappings": workspace_state["mappings"],
+            "transmittal_columns": workspace_state["transmittal_columns"]
         }
     })
 
@@ -176,19 +221,44 @@ def auto_match_route():
         "mapping": auto_map
     })
 
+@app.route('/api/template/transmittal-columns', methods=['GET', 'POST'])
+def handle_transmittal_columns():
+    if request.method == 'GET':
+        if not workspace_state["transmittal_columns"] and workspace_state["headers"]:
+            workspace_state["transmittal_columns"] = build_default_transmittal_columns(workspace_state["headers"])
+        return jsonify({
+            "columns": workspace_state["transmittal_columns"]
+        })
+    elif request.method == 'POST':
+        data = request.json
+        cols = data.get('columns', [])
+        workspace_state["transmittal_columns"] = cols
+        return jsonify({
+            "message": "Saved transmittal columns configuration!",
+            "columns": cols
+        })
+
 @app.route('/api/template/pdf-preview', methods=['GET'])
 def get_pdf_preview():
     doc_type = request.args.get('type', 'template')
     target_path = workspace_state["template_file"] if doc_type == 'template' else workspace_state["transmittal_template"]
     excel_path = workspace_state["excel_file"]
     mapping = workspace_state["mappings"].get(doc_type, {})
+    trans_cols = workspace_state.get("transmittal_columns", [])
 
     if not target_path or not os.path.exists(target_path):
         return jsonify({"error": "Template file not loaded"}), 400
 
     try:
         pdf_name = f"preview_{doc_type}"
-        pdf_path = render_sample_pdf_preview(excel_path, target_path, mapping, app.config['TEMP_FOLDER'], pdf_name)
+        pdf_path = render_sample_pdf_preview(
+            excel_path,
+            target_path,
+            mapping,
+            app.config['TEMP_FOLDER'],
+            pdf_name,
+            transmittal_columns=trans_cols
+        )
         return send_file(pdf_path, mimetype='application/pdf')
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -206,6 +276,7 @@ def stream_process():
     trans_path = workspace_state["transmittal_template"]
     app_mapping = workspace_state["mappings"].get("template", {})
     trans_mapping = workspace_state["mappings"].get("transmittal", {})
+    trans_cols = workspace_state.get("transmittal_columns", [])
 
     if not excel_path or not template_path or not trans_path:
         def err_generator():
@@ -232,6 +303,7 @@ def stream_process():
                 max_workers=max_workers,
                 template_mapping=app_mapping,
                 transmittal_mapping=trans_mapping,
+                transmittal_columns=trans_cols,
                 progress_callback=progress_callback
             )
             msg_queue.put({"type": "complete", "summary": summary})

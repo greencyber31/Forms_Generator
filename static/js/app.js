@@ -121,6 +121,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function loadTagConnector(type) {
+        if (type === 'transmittal') {
+            loadTransmittalColumnsConnector();
+            return;
+        }
+
         const container = document.getElementById('mapping-rows-container');
         const badge = document.getElementById('tag-count-badge');
         container.innerHTML = '<p style="color:var(--text-muted); padding:1rem;"><i class="fa-solid fa-spinner fa-spin"></i> Scanning document tags & loading field connectors...</p>';
@@ -232,6 +237,153 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function loadTransmittalColumnsConnector() {
+        const container = document.getElementById('mapping-rows-container');
+        const badge = document.getElementById('tag-count-badge');
+        container.innerHTML = '<p style="color:var(--text-muted); padding:1rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading Excel columns configuration...</p>';
+
+        fetch('/api/template/transmittal-columns')
+        .then(res => res.json())
+        .then(data => {
+            const columns = data.columns || [];
+            const activeCount = columns.filter(c => c.enabled).length;
+            badge.textContent = `${activeCount} of ${columns.length} Excel Columns Selected`;
+
+            if (columns.length === 0) {
+                container.innerHTML = '<p style="color:var(--text-muted); padding:1rem;">No Excel columns loaded. Please upload an Excel file in Step 1.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="column-selector-toolbar">
+                    <span class="toolbar-title"><i class="fa-solid fa-table-columns"></i> Transmittal Dynamic Column Selector</span>
+                    <div class="toolbar-btns">
+                        <button type="button" class="btn btn-xs btn-outline" id="btn-col-defaults"><i class="fa-solid fa-wand-magic-sparkles"></i> Select Standard Defaults</button>
+                        <button type="button" class="btn btn-xs btn-outline" id="btn-col-select-all"><i class="fa-solid fa-check-double"></i> Select All</button>
+                        <button type="button" class="btn btn-xs btn-outline" id="btn-col-deselect-all"><i class="fa-solid fa-square-xmark"></i> Deselect All</button>
+                    </div>
+                </div>
+                <div class="trans-columns-list" id="trans-columns-list"></div>
+            `;
+
+            const listEl = container.querySelector('#trans-columns-list');
+
+            columns.forEach(col => {
+                const item = document.createElement('div');
+                item.className = `trans-col-item ${col.enabled ? 'selected' : 'disabled'}`;
+                item.setAttribute('data-header', col.header);
+
+                item.innerHTML = `
+                    <label class="col-check-label">
+                        <input type="checkbox" class="trans-col-checkbox" ${col.enabled ? 'checked' : ''} />
+                        <span class="excel-col-badge"><i class="fa-solid fa-file-excel"></i> ${col.header}</span>
+                    </label>
+                    <div class="col-order-box">
+                        <span class="order-label">Col Position:</span>
+                        <input type="number" min="1" max="99" class="col-order-input" value="${col.order || ''}" placeholder="#" />
+                    </div>
+                `;
+
+                const chk = item.querySelector('.trans-col-checkbox');
+                const ordInput = item.querySelector('.col-order-input');
+
+                chk.addEventListener('change', () => {
+                    item.className = `trans-col-item ${chk.checked ? 'selected' : 'disabled'}`;
+                    if (chk.checked && !ordInput.value) {
+                        let maxOrd = 0;
+                        document.querySelectorAll('.col-order-input').forEach(inp => {
+                            const val = parseInt(inp.value, 10);
+                            if (!isNaN(val) && val > maxOrd) maxOrd = val;
+                        });
+                        ordInput.value = maxOrd + 1;
+                    }
+                    saveTransmittalColumns();
+                });
+
+                let timer = null;
+                ordInput.addEventListener('input', () => {
+                    clearTimeout(timer);
+                    timer = setTimeout(() => {
+                        saveTransmittalColumns();
+                    }, 400);
+                });
+
+                listEl.appendChild(item);
+            });
+
+            container.querySelector('#btn-col-defaults').addEventListener('click', () => {
+                fetch('/api/template/transmittal-columns', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ columns: [] })
+                })
+                .then(() => loadTransmittalColumnsConnector());
+            });
+
+            container.querySelector('#btn-col-select-all').addEventListener('click', () => {
+                let idx = 1;
+                document.querySelectorAll('.trans-col-item').forEach(item => {
+                    item.className = 'trans-col-item selected';
+                    const chk = item.querySelector('.trans-col-checkbox');
+                    const inp = item.querySelector('.col-order-input');
+                    chk.checked = true;
+                    if (!inp.value) inp.value = idx;
+                    idx++;
+                });
+                saveTransmittalColumns();
+            });
+
+            container.querySelector('#btn-col-deselect-all').addEventListener('click', () => {
+                document.querySelectorAll('.trans-col-item').forEach(item => {
+                    item.className = 'trans-col-item disabled';
+                    const chk = item.querySelector('.trans-col-checkbox');
+                    chk.checked = false;
+                });
+                saveTransmittalColumns();
+            });
+
+            reloadSamplePdfPreview('transmittal');
+        })
+        .catch(err => {
+            container.innerHTML = `<p style="color:var(--accent-red); padding:1rem;">Failed to load column connector: ${err}</p>`;
+        });
+    }
+
+    let saveTransColTimer = null;
+    function saveTransmittalColumns() {
+        clearTimeout(saveTransColTimer);
+        saveTransColTimer = setTimeout(() => {
+            const columns = [];
+            document.querySelectorAll('.trans-col-item').forEach(item => {
+                const header = item.getAttribute('data-header');
+                const chk = item.querySelector('.trans-col-checkbox');
+                const ordInput = item.querySelector('.col-order-input');
+                const orderVal = parseInt(ordInput.value, 10);
+
+                columns.push({
+                    header: header,
+                    enabled: chk ? chk.checked : false,
+                    order: isNaN(orderVal) ? 999 : orderVal
+                });
+            });
+
+            workspace.transmittal_columns = columns;
+
+            fetch('/api/template/transmittal-columns', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ columns: columns })
+            })
+            .then(res => res.json())
+            .then(() => {
+                const activeCount = columns.filter(c => c.enabled).length;
+                const badge = document.getElementById('tag-count-badge');
+                if (badge) badge.textContent = `${activeCount} of ${columns.length} Excel Columns Selected`;
+                reloadSamplePdfPreview('transmittal');
+            });
+        }, 300);
+    }
+
     let saveMappingTimer = null;
     function saveCurrentMappings() {
         clearTimeout(saveMappingTimer);
@@ -268,6 +420,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function triggerAutoMatch() {
+        if (activePreviewType === 'transmittal') {
+            showToast("Resetting to standard transmittal column defaults...", "info");
+            fetch('/api/template/transmittal-columns', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ columns: [] })
+            })
+            .then(() => loadTransmittalColumnsConnector());
+            return;
+        }
+
         showToast("Auto-matching Word tags with Excel columns...", "info");
         fetch('/api/template/auto-match', {
             method: 'POST',
@@ -287,6 +450,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function resetMappings() {
+        if (activePreviewType === 'transmittal') {
+            showToast("Unchecking all transmittal columns...", "info");
+            document.querySelectorAll('.trans-col-item').forEach(item => {
+                item.className = 'trans-col-item disabled';
+                const chk = item.querySelector('.trans-col-checkbox');
+                if (chk) chk.checked = false;
+            });
+            saveTransmittalColumns();
+            return;
+        }
+
         showToast("Resetting field mappings...", "info");
         workspace.mappings[activePreviewType] = {};
         saveCurrentMappings();

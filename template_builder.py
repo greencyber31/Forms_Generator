@@ -205,7 +205,8 @@ def render_sample_pdf_preview(
     docx_path: str,
     mapping: dict[str, str],
     temp_dir: str,
-    output_name: str
+    output_name: str,
+    transmittal_columns: list[dict] | None = None
 ) -> str:
     """
     Renders sample Row 1 data from Excel into the Word template using docxtpl,
@@ -245,7 +246,12 @@ def render_sample_pdf_preview(
                     df = pd.read_excel(excel_path, nrows=5)
                     from generator_engine import _build_context
                     for _, r in df.iterrows():
-                        farmers_list.append(_build_context(r.to_dict(), mapping))
+                        r_d = r.to_dict()
+                        f_ctx = _build_context(r_d, mapping)
+                        for r_k, r_v in r_d.items():
+                            if r_k not in f_ctx:
+                                f_ctx[r_k] = r_v
+                        farmers_list.append(f_ctx)
                 except Exception:
                     pass
 
@@ -257,7 +263,7 @@ def render_sample_pdf_preview(
 
             try:
                 from generator_engine import _populate_transmittal_table
-                _populate_transmittal_table(tpl.docx.tables[0], farmers_list, mapping)
+                _populate_transmittal_table(tpl.docx.tables[0], farmers_list, mapping, transmittal_columns)
             except Exception:
                 pass
 

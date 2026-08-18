@@ -142,7 +142,7 @@ def _get_farmer_val(farmer: dict, tag_key: str, mapping: dict | None = None) -> 
 
     return ""
 
-def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_mapping: dict | None = None):
+def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_mapping: dict | None = None, transmittal_columns: list[dict] | None = None):
     if not farmers_list:
         return
 
@@ -167,6 +167,71 @@ def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_map
                 trPr.append(OxmlElement('w:tblHeader'))
     except Exception:
         pass
+
+    # Check for active transmittal columns
+    active_cols = []
+    if transmittal_columns:
+        active_cols = [c for c in transmittal_columns if c.get('enabled', True)]
+        def safe_order(c):
+            val = c.get('order')
+            try:
+                return int(val)
+            except Exception:
+                return 999
+        active_cols.sort(key=safe_order)
+
+    if active_cols:
+        target_count = len(active_cols)
+        while len(table.columns) < target_count:
+            table.add_column(Mm(160 / target_count))
+
+        header_cells = table.rows[header_row_idx].cells
+        for col_i, col_info in enumerate(active_cols):
+            if col_i < len(header_cells):
+                header_cells[col_i].text = str(col_info["header"])
+
+        has_sample_row = len(table.rows) > sample_row_idx
+        col_formats = []
+        for col_idx in range(target_count):
+            fmt = {'name': None, 'size': None, 'bold': None}
+            try:
+                cell = table.cell(sample_row_idx, col_idx)
+                if cell.paragraphs and cell.paragraphs[0].runs:
+                    r = cell.paragraphs[0].runs[0]
+                    fmt['name'] = r.font.name
+                    fmt['size'] = r.font.size
+                    fmt['bold'] = r.bold if has_sample_row else False
+            except Exception:
+                pass
+            col_formats.append(fmt)
+
+        for i, farmer in enumerate(farmers_list):
+            if i == 0 and has_sample_row:
+                row_cells = table.rows[sample_row_idx].cells
+            else:
+                row_cells = table.add_row().cells
+
+            for col_i, col_info in enumerate(active_cols):
+                if col_i >= len(row_cells):
+                    break
+                header_name = col_info["header"]
+                val = _get_farmer_val(farmer, header_name, transmittal_mapping)
+                row_cells[col_i].text = str(val) if val is not None else ""
+
+            for col_idx, cell in enumerate(row_cells):
+                if col_idx < len(col_formats):
+                    fmt = col_formats[col_idx]
+                    for p in cell.paragraphs:
+                        for r in p.runs:
+                            if fmt['name']:
+                                r.font.name = fmt['name']
+                            if fmt['size']:
+                                r.font.size = fmt['size']
+                            if fmt['bold'] is not None:
+                                r.bold = fmt['bold']
+
+        _ensure_table_borders(table)
+        return
 
     col_tags = {}
     header_cells = table.rows[header_row_idx].cells
@@ -255,7 +320,7 @@ def _generate_one_pdf(args: tuple):
 
         # Transmittal list table injection if farmers array is present (BEFORE doc.render)
         if 'farmers' in context and doc.docx.tables:
-            _populate_transmittal_table(doc.docx.tables[0], context['farmers'], context.get('_transmittal_mapping'))
+            _populate_transmittal_table(doc.docx.tables[0], context['farmers'], context.get('_transmittal_mapping'), context.get('_transmittal_columns'))
 
         doc.render(context)
         
@@ -266,7 +331,7 @@ def _generate_one_pdf(args: tuple):
             
         # Transmittal list table injection if farmers array is present
         if 'farmers' in context and doc.docx.tables:
-            _populate_transmittal_table(doc.docx.tables[0], context['farmers'], context.get('_transmittal_mapping'))
+            _populate_transmittal_table(doc.docx.tables[0], context['farmers'], context.get('_transmittal_mapping'), context.get('_transmittal_columns'))
 
         doc.save(temp_docx_path)
 
@@ -348,6 +413,7 @@ def run_batch_generation(
     max_workers: int = 4,
     template_mapping: dict | None = None,
     transmittal_mapping: dict | None = None,
+    transmittal_columns: list[dict] | None = None,
     progress_callback=None
 ):
     """
@@ -437,7 +503,8 @@ def run_batch_generation(
         # 1. Transmittal Data
         farmers_list = []
         for _, row in group_df.iterrows():
-            ctx = _build_context(row.to_dict(), transmittal_mapping)
+            r_d = row.to_dict()
+            ctx = _build_context(r_d, transmittal_mapping)
             ctx['Barangay'] = brgy_name
             if 'Full_Name' not in ctx:
                 ctx['Full_Name'] = ctx.get('Fullname', ctx.get('Name', ''))
@@ -445,6 +512,10 @@ def run_batch_generation(
                 ctx['Birthday'] = ctx.get('Birthdate', ctx.get('Birth_Date', ''))
             if 'Reference_No' not in ctx:
                 ctx['Reference_No'] = ctx.get('Reference_No.', ctx.get('ID', ''))
+            # Store all original raw row fields as fallbacks
+            for r_k, r_v in r_d.items():
+                if r_k not in ctx:
+                    ctx[r_k] = r_v
             farmers_list.append(ctx)
 
         # 2. Submit Transmittal Job
@@ -454,7 +525,8 @@ def run_batch_generation(
             'municipality': muni_name,
             'province': prov_name,
             'farmers': farmers_list,
-            '_transmittal_mapping': transmittal_mapping
+            '_transmittal_mapping': transmittal_mapping,
+            '_transmittal_columns': transmittal_columns
         }
         if transmittal_mapping:
             for tag, val in transmittal_mapping.items():
