@@ -145,7 +145,7 @@ def _get_farmer_val(farmer: dict, tag_key: str, mapping: dict | None = None) -> 
 def _calculate_smart_column_widths(active_cols: list[dict], farmers_list: list[dict], total_width_mm: float = 160.0) -> list[float]:
     """
     Calculates content-aware column widths based on header length and max data row text length.
-    Ensures short columns (Gender, Suffix, ID) take less space and long columns (Names, Address, Contact) get more space.
+    Ensures short columns (Gender, Suffix, ID) take less space and long columns (Names, Address, Reference No.) get more space.
     Strictly normalizes all column widths so their sum is EXACTLY equal to total_width_mm (160mm),
     preventing any table overflow beyond the A4 page margins.
     """
@@ -155,27 +155,44 @@ def _calculate_smart_column_widths(active_cols: list[dict], farmers_list: list[d
     scores = []
     for col_info in active_cols:
         h_name = str(col_info.get("header", ""))
-        max_char_len = max(len(h_name), 4)
-
+        h_clean = h_name.lower().strip()
+        max_val_len = 0
         for farmer in farmers_list[:50]:
             val = _get_farmer_val(farmer, h_name, None)
             if val:
-                max_char_len = max(max_char_len, min(len(str(val)), 30))
+                max_val_len = max(max_val_len, len(str(val)))
 
-        scores.append(max_char_len ** 0.85)
+        if (max_val_len <= 3 and ('gender' in h_clean or 'sex' in h_clean or 'suffix' in h_clean)) or h_clean in {'m/f', 'g'}:
+            score = 6.0
+        elif 'ref' in h_clean or 'rsbsa' in h_clean or 'id' in h_clean or max_val_len >= 16:
+            score = max(max_val_len, len(h_name)) * 1.55
+        elif 'date' in h_clean or 'birth' in h_clean or max_val_len == 10:
+            score = max(max_val_len, 10) * 1.05
+        else:
+            score = max(max_val_len, len(h_name), 8) * 1.25
+        scores.append(score)
 
     total_score = sum(scores)
     if total_score <= 0:
         total_score = 1.0
 
-    raw_widths = [(score / total_score) * total_width_mm for score in scores]
-    min_col_mm = max(10.0, total_width_mm / (len(active_cols) * 2.5))
-    floored_widths = [max(w, min_col_mm) for w in raw_widths]
+    raw_widths = [(s / total_score) * total_width_mm for s in scores]
 
-    floored_sum = sum(floored_widths)
-    final_widths = [(w / floored_sum) * total_width_mm for w in floored_widths]
+    final_widths = []
+    for idx, col_info in enumerate(active_cols):
+        h_clean = str(col_info.get("header", "")).lower().strip()
+        w = raw_widths[idx]
+        if 'gender' in h_clean or 'sex' in h_clean or 'suffix' in h_clean:
+            w = min(w, 13.0)
+            w = max(w, 9.0)
+        elif 'ref' in h_clean or 'rsbsa' in h_clean:
+            w = max(w, 40.0)
+        final_widths.append(w)
 
-    return final_widths
+    final_sum = sum(final_widths)
+    normalized_widths = [(w / final_sum) * total_width_mm for w in final_widths]
+
+    return normalized_widths
 
 def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_mapping: dict | None = None, transmittal_columns: list[dict] | None = None):
     if not farmers_list:
