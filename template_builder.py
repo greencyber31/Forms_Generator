@@ -1,6 +1,8 @@
 import re
 import os
 import subprocess
+import shutil
+import uuid
 from pathlib import Path
 import pandas as pd
 import docx
@@ -39,11 +41,11 @@ def extract_docx_tags(docx_path: str) -> list[str]:
         def extract_text_tags(text: str):
             matches = re.findall(r'\{\{\s*([^\}\s]+)\s*\}\}', text)
             for tag in matches:
-                if tag not in seen:
-                    seen.add(tag)
-                    found_tags.append(tag)
+                clean_tag = sanitize_key(tag)
+                if clean_tag and clean_tag not in seen:
+                    seen.add(clean_tag)
+                    found_tags.append(clean_tag)
 
-        # 1. Body paragraphs & tables
         for element in doc.element.body:
             if element.tag.endswith('p'):
                 p = docx.text.paragraph.Paragraph(element, doc)
@@ -54,25 +56,6 @@ def extract_docx_tags(docx_path: str) -> list[str]:
                     for cell in row.cells:
                         for cell_p in cell.paragraphs:
                             extract_text_tags(cell_p.text)
-
-        # 2. Section headers & footers
-        for section in doc.sections:
-            if section.header:
-                for p in section.header.paragraphs:
-                    extract_text_tags(p.text)
-                for t in section.header.tables:
-                    for row in t.rows:
-                        for cell in row.cells:
-                            for cell_p in cell.paragraphs:
-                                extract_text_tags(cell_p.text)
-            if section.footer:
-                for p in section.footer.paragraphs:
-                    extract_text_tags(p.text)
-                for t in section.footer.tables:
-                    for row in t.rows:
-                        for cell in row.cells:
-                            for cell_p in cell.paragraphs:
-                                extract_text_tags(cell_p.text)
 
         return found_tags
     except Exception as e:
@@ -143,37 +126,77 @@ def auto_match_tags(excel_headers: list[str], docx_tags: list[str]) -> dict[str,
     return mapping
 
 def render_docx_to_pdf_preview(docx_path: str, temp_dir: str, output_name: str) -> str:
-    """Converts docx to high-fidelity PDF via LibreOffice for 1:1 exact visual preview."""
+    """Converts docx to high-fidelity PDF via LibreOffice or MS Word for 1:1 exact visual preview."""
     try:
         out_dir = Path(temp_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         pdf_path = out_dir / f"{output_name}.pdf"
+        docx_abs = os.path.abspath(docx_path)
+        pdf_abs = os.path.abspath(str(pdf_path))
 
-        profile_dir = (out_dir / f"profile_{output_name}").resolve()
-        profile_dir.mkdir(parents=True, exist_ok=True)
-        profile_url = profile_dir.as_uri()
+        lo_bin = shutil.which("libreoffice") or shutil.which("soffice")
+        if not lo_bin:
+            for loc in [
+                r"C:\Program Files\LibreOffice\program\soffice.exe",
+                r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+            ]:
+                if os.path.exists(loc):
+                    lo_bin = loc
+                    break
 
-        subprocess.run(
-            [
-                "libreoffice",
-                f"-env:UserInstallation={profile_url}",
-                "--headless",
-                "--convert-to", "pdf",
-                docx_path,
-                "--outdir", str(out_dir),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True
-        )
+        if lo_bin:
+            profile_dir = (out_dir / f"profile_{output_name}").resolve()
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            profile_url = profile_dir.as_uri()
 
-        generated_pdf = out_dir / f"{Path(docx_path).stem}.pdf"
-        if generated_pdf.exists() and generated_pdf != pdf_path:
-            if pdf_path.exists():
-                os.remove(pdf_path)
-            os.rename(generated_pdf, pdf_path)
+            subprocess.run(
+                [
+                    lo_bin,
+                    f"-env:UserInstallation={profile_url}",
+                    "--headless",
+                    "--convert-to", "pdf",
+                    docx_abs,
+                    "--outdir", str(out_dir),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True
+            )
 
-        return str(pdf_path)
+            generated_pdf = out_dir / f"{Path(docx_path).stem}.pdf"
+            if generated_pdf.exists() and generated_pdf.resolve() != pdf_path.resolve():
+                if pdf_path.exists():
+                    try:
+                        os.remove(pdf_path)
+                    except Exception:
+                        pass
+                os.rename(generated_pdf, pdf_path)
+
+            return str(pdf_path)
+
+        if os.name == 'nt':
+            import win32com.client as win32
+            import pythoncom
+            pythoncom.CoInitialize()
+            word = None
+            try:
+                word = win32.DispatchEx("Word.Application")
+                word.Visible = False
+                word.DisplayAlerts = 0
+                doc = word.Documents.Open(docx_abs, ReadOnly=True)
+                doc.SaveAs(pdf_abs, FileFormat=17)
+                doc.Close(0)
+                if os.path.exists(pdf_abs):
+                    return pdf_abs
+            finally:
+                if word:
+                    try:
+                        word.Quit()
+                    except Exception:
+                        pass
+                pythoncom.CoUninitialize()
+
+        raise RuntimeError("No PDF engine available (LibreOffice or MS Word required).")
     except Exception as e:
         raise ValueError(f"Failed to convert docx to preview PDF: {str(e)}")
 
@@ -185,79 +208,77 @@ def render_sample_pdf_preview(
     output_name: str
 ) -> str:
     """
-    Renders sample data from Excel into the Word template using docxtpl,
+    Renders sample Row 1 data from Excel into the Word template using docxtpl,
     then converts to PDF for live 1:1 previewing in the browser.
     """
     try:
         docx_tags = extract_docx_tags(docx_path)
         context = {tag: "" for tag in docx_tags}
 
-        df_sample = None
         row_dict = {}
         if excel_path and os.path.exists(excel_path):
             try:
-                df_sample = pd.read_excel(excel_path, nrows=5)
-                if not df_sample.empty:
-                    row_dict = df_sample.iloc[0].to_dict()
+                df = pd.read_excel(excel_path, nrows=1)
+                if not df.empty:
+                    row_dict = df.iloc[0].to_dict()
             except Exception:
                 pass
 
-        for tag in docx_tags:
-            mapped_val = mapping.get(tag)
-            if mapped_val:
-                if isinstance(mapped_val, str) and mapped_val.startswith("STATIC:"):
+        if row_dict:
+            from generator_engine import _build_context
+            b_ctx = _build_context(row_dict, mapping)
+            context.update(b_ctx)
+        else:
+            for tag in docx_tags:
+                mapped_val = mapping.get(tag)
+                if mapped_val and isinstance(mapped_val, str) and mapped_val.startswith("STATIC:"):
                     context[tag] = mapped_val[7:]
-                elif mapped_val in row_dict:
-                    val = row_dict[mapped_val]
-                    context[tag] = str(val) if pd.notna(val) else ""
-
-        # Build sample farmers if rendering transmittal template
-        if 'transmittal' in output_name.lower() or 'transmittal' in docx_path.lower():
-            farmers = []
-            if df_sample is not None and not df_sample.empty:
-                for _, s_row in df_sample.iterrows():
-                    r_d = s_row.to_dict()
-                    def find_val(candidates):
-                        for c in candidates:
-                            for r_k, r_v in r_d.items():
-                                if str(r_k).strip().lower() == c.lower() and pd.notna(r_v) and str(r_v).strip():
-                                    return str(r_v).strip()
-                        return ""
-                    
-                    fn = find_val(['Full Name', 'Full_Name', 'Farmer Name', 'Name'])
-                    if not fn:
-                        fname = find_val(['First Name', 'First_Name'])
-                        lname = find_val(['Last Name', 'Last_Name'])
-                        if fname or lname:
-                            fn = f"{lname}, {fname}".strip(', ')
-                    
-                    bd = find_val(['Birth Date', 'Birth_Date', 'Birthdate', 'Birthday', 'DOB', 'Bday'])
-                    if bd and hasattr(s_row.get('Birth Date', ''), 'strftime'):
-                        bd = s_row.get('Birth Date').strftime('%m/%d/%Y')
-                    
-                    farmers.append({
-                        'Barangay': find_val(['Barangay', 'Brgy']),
-                        'Full_Name': fn or 'DELA CRUZ, JUAN A.',
-                        'Birthday': str(bd) if bd else '01/01/1980',
-                        'Gender': find_val(['Gender', 'Sex']) or 'Male',
-                        'Reference_No': find_val(['Reference No.', 'Reference No', 'Reference_No', 'Farmer ID', 'ID']) or 'REF-00001'
-                    })
-            context['farmers'] = farmers
 
         tpl = DocxTemplate(docx_path)
+        tpl.init_docx()
+
+        # Only populate transmittal summary table if this is a transmittal template preview (BEFORE render)
+        if tpl.docx.tables and 'transmittal' in output_name.lower():
+            farmers_list = []
+            if excel_path and os.path.exists(excel_path):
+                try:
+                    df = pd.read_excel(excel_path, nrows=5)
+                    from generator_engine import _build_context
+                    for _, r in df.iterrows():
+                        farmers_list.append(_build_context(r.to_dict(), mapping))
+                except Exception:
+                    pass
+
+            if not farmers_list:
+                farmers_list = [
+                    {'Barangay': 'Sample Brgy', 'Full_Name': 'DELA CRUZ, JUAN', 'Birthday': '01/01/1990', 'Gender': 'Male', 'Reference_No': 'REF-001'},
+                    {'Barangay': 'Sample Brgy', 'Full_Name': 'SANTOS, MARIA', 'Birthday': '02/02/1992', 'Gender': 'Female', 'Reference_No': 'REF-002'}
+                ]
+
+            try:
+                from generator_engine import _populate_transmittal_table
+                _populate_transmittal_table(tpl.docx.tables[0], farmers_list, mapping)
+            except Exception:
+                pass
+
         tpl.render(context)
-
-        # Inject sample table rows if farmers context exists
-        if 'farmers' in context and tpl.docx.tables:
-            from generator_engine import populate_transmittal_table
-            populate_transmittal_table(tpl.docx, context['farmers'])
-
+        
         out_dir = Path(temp_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        filled_docx = out_dir / f"{output_name}_sample.docx"
+        unique_id = uuid.uuid4().hex[:8]
+        sample_docx_name = f"{output_name}_{unique_id}_sample.docx"
+        filled_docx = out_dir / sample_docx_name
         tpl.save(filled_docx)
 
-        return render_docx_to_pdf_preview(str(filled_docx), temp_dir, output_name)
+        pdf_path = render_docx_to_pdf_preview(str(filled_docx), temp_dir, f"{output_name}_{unique_id}")
+        
+        # Clean up transient sample docx
+        try:
+            if os.path.exists(filled_docx):
+                os.remove(filled_docx)
+        except Exception:
+            pass
+
+        return pdf_path
     except Exception as e:
         raise ValueError(f"Failed to render sample PDF preview: {str(e)}")
-

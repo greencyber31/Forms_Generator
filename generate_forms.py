@@ -66,13 +66,13 @@ def _generate_one_pdf(args: tuple):
     """
     Worker function (runs in a separate process):
       1. Fills the .docx template for a single farmer row.
-      2. Converts the filled .docx to PDF via LibreOffice.
+      2. Converts the filled .docx to PDF via LibreOffice or MS Word COM.
       3. Returns (worker_idx, pdf_path | None, error_message | None).
 
     Each worker gets its own LibreOffice user-profile directory so that
     multiple LO instances can run truly in parallel without conflicts.
     """
-    worker_idx, context, template_file, temp_dir_str, lo_profile_base_str = args
+    worker_idx, context, template_file, temp_dir_str, lo_profile_base_str, com_lock = args
 
     temp_dir        = Path(temp_dir_str)
     lo_profile_base = Path(lo_profile_base_str)
@@ -157,27 +157,68 @@ def _generate_one_pdf(args: tuple):
                 
         doc.save(temp_docx_path)
 
-        # 2. Convert to PDF (LO output goes to the log file, not /dev/null)
-        with open(lo_log_path, "w") as log_f:
-            result = subprocess.run(
-                [
-                    "libreoffice",
-                    f"-env:UserInstallation={lo_profile_url}",
-                    "--headless",
-                    "--convert-to", "pdf",
-                    str(temp_docx_path),
-                    "--outdir", str(temp_dir),
-                ],
-                stdout=log_f,
-                stderr=log_f,
-                check=False,
-            )
+        # 2. Convert to PDF (LibreOffice or MS Word COM)
+        lo_bin = shutil.which("libreoffice") or shutil.which("soffice")
+        if not lo_bin:
+            for loc in [
+                r"C:\Program Files\LibreOffice\program\soffice.exe",
+                r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+            ]:
+                if os.path.exists(loc):
+                    lo_bin = loc
+                    break
 
-        if result.returncode != 0 or not temp_pdf_path.exists():
-            lo_log = lo_log_path.read_text(errors="replace").strip()
+        if lo_bin:
+            with open(lo_log_path, "w") as log_f:
+                result = subprocess.run(
+                    [
+                        lo_bin,
+                        f"-env:UserInstallation={lo_profile_url}",
+                        "--headless",
+                        "--convert-to", "pdf",
+                        str(temp_docx_path.resolve()),
+                        "--outdir", str(temp_dir.resolve()),
+                    ],
+                    stdout=log_f,
+                    stderr=log_f,
+                    check=False,
+                )
+
+            if result.returncode == 0 and temp_pdf_path.exists():
+                return worker_idx, temp_pdf_path, None
+
+            lo_log = lo_log_path.read_text(errors="replace").strip() if lo_log_path.exists() else ""
             return worker_idx, None, f"LibreOffice rc={result.returncode}:\n{lo_log}"
 
-        return worker_idx, temp_pdf_path, None
+        if os.name == 'nt':
+            if com_lock:
+                com_lock.acquire()
+            try:
+                import win32com.client as win32
+                import pythoncom
+                pythoncom.CoInitialize()
+                word = None
+                try:
+                    word = win32.DispatchEx("Word.Application")
+                    word.Visible = False
+                    word.DisplayAlerts = 0
+                    doc = word.Documents.Open(str(temp_docx_path.resolve()), ReadOnly=True)
+                    doc.SaveAs(str(temp_pdf_path.resolve()), FileFormat=17)
+                    doc.Close(0)
+                    if temp_pdf_path.exists():
+                        return worker_idx, temp_pdf_path, None
+                finally:
+                    if word:
+                        try:
+                            word.Quit()
+                        except Exception:
+                            pass
+                    pythoncom.CoUninitialize()
+            finally:
+                if com_lock:
+                    com_lock.release()
+
+        return worker_idx, None, "No PDF engine available (LibreOffice or MS Word required)."
 
     except Exception as exc:
         return worker_idx, None, str(exc)
@@ -247,6 +288,10 @@ def main():
     job_meta:  list[tuple] = []   # (province, municipality, barangay, is_transmittal) per job
     lo_profile_base = str(TEMP_DIR.resolve() / "lo_profiles")
 
+    import multiprocessing
+    manager = multiprocessing.Manager()
+    com_lock = manager.Lock()
+
     for (province_name, municipality_name, barangay_name), group_df in grouped:
         if not province_name or not municipality_name or not barangay_name:
             continue  # skip fully-empty location entries
@@ -275,6 +320,7 @@ def main():
             TRANSMITTAL_TEMPLATE,
             str(TEMP_DIR.resolve()),
             lo_profile_base,
+            com_lock,
         ))
         job_meta.append((province_name, municipality_name, barangay_name, True))
 
@@ -287,6 +333,7 @@ def main():
                 TEMPLATE_FILE,
                 str(TEMP_DIR.resolve()),
                 lo_profile_base,
+                com_lock,
             ))
             job_meta.append((province_name, municipality_name, barangay_name, False))
 

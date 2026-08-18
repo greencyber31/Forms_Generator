@@ -16,6 +16,10 @@ temp_docs/
 temp_test_multi/
 uploads/*
 !uploads/.gitkeep
+*.png
+*.pdf
+*.log
+scratch/
 
 # IDEs and OS metadata
 .DS_Store
@@ -23,4 +27,3 @@ uploads/*
 .idea/
 *.swp
 *.tmp
-*.log

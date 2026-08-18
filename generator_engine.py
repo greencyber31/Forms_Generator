@@ -2,6 +2,7 @@ import pandas as pd
 from docxtpl import DocxTemplate
 from docx.shared import Mm
 import os
+import re
 import subprocess
 import concurrent.futures
 import logging
@@ -89,13 +90,61 @@ def _ensure_table_borders(table):
     except Exception:
         pass
 
-def populate_transmittal_table(docx_obj, farmers: list[dict]):
-    """Injects and formats farmers list into the first table of a transmittal document."""
-    if not farmers or not docx_obj.tables:
+def _get_farmer_val(farmer: dict, tag_key: str, mapping: dict | None = None) -> str:
+    if not tag_key or not farmer:
+        return ""
+
+    mapped_col = mapping.get(tag_key) if mapping else None
+    if mapped_col:
+        if isinstance(mapped_col, str) and mapped_col.startswith("STATIC:"):
+            return mapped_col[7:]
+        val = farmer.get(mapped_col, farmer.get(sanitize_key(mapped_col)))
+        if val is not None and not pd.isna(val) and str(val).lower() not in {'nan', 'none', 'null'}:
+            return str(val)
+
+    if tag_key in farmer and farmer[tag_key] is not None and not pd.isna(farmer[tag_key]):
+        return str(farmer[tag_key])
+
+    tag_clean = sanitize_key(tag_key).lower()
+    farmer_lower = {sanitize_key(k).lower(): v for k, v in farmer.items() if v is not None and not pd.isna(v)}
+    if tag_clean in farmer_lower:
+        return str(farmer_lower[tag_clean])
+
+    if 'name' in tag_clean:
+        if 'last' in tag_clean and 'last_name' in farmer_lower:
+            return str(farmer_lower['last_name'])
+        if 'first' in tag_clean and 'first_name' in farmer_lower:
+            return str(farmer_lower['first_name'])
+        if 'middle' in tag_clean and 'middle_name' in farmer_lower:
+            return str(farmer_lower['middle_name'])
+        if 'full_name' in farmer_lower:
+            return str(farmer_lower['full_name'])
+
+    if 'ref' in tag_clean or 'id' in tag_clean or 'no' in tag_clean:
+        for r_key in ['rsbsa_no', 'reference_no', 'reference_no.', 'id', 'farmer_id', 'ref_no']:
+            if r_key in farmer_lower:
+                return str(farmer_lower[r_key])
+
+    if 'birth' in tag_clean or 'bday' in tag_clean:
+        for b_key in ['birthdate', 'birth_date', 'birthday', 'bday']:
+            if b_key in farmer_lower:
+                return str(farmer_lower[b_key])
+
+    if 'gender' in tag_clean or 'sex' in tag_clean:
+        for g_key in ['gender', 'sex']:
+            if g_key in farmer_lower:
+                return str(farmer_lower[g_key])
+
+    if 'brgy' in tag_clean or 'barangay' in tag_clean:
+        for br_key in ['barangay', 'brgy', 'home_barangay', 'farm_barangay']:
+            if br_key in farmer_lower:
+                return str(farmer_lower[br_key])
+
+    return ""
+
+def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_mapping: dict | None = None):
+    if not farmers_list:
         return
-    table = docx_obj.tables[0]
-    TABLE_WIDTH_MM = 160
-    table.width = Mm(TABLE_WIDTH_MM)
 
     header_row_idx = 0
     sample_row_idx = 1 if len(table.rows) > 1 else 0
@@ -119,7 +168,23 @@ def populate_transmittal_table(docx_obj, farmers: list[dict]):
     except Exception:
         pass
 
-    headers_in_table = [c.text.strip().lower() for c in table.rows[header_row_idx].cells]
+    col_tags = {}
+    header_cells = table.rows[header_row_idx].cells
+    for col_i, cell in enumerate(header_cells):
+        raw_text = cell.text.strip()
+        matches = re.findall(r'\{\{\s*([^\}\s]+)\s*\}\}', raw_text)
+        if matches:
+            tag_name = matches[0]
+            col_tags[col_i] = tag_name
+            mapped_val = transmittal_mapping.get(tag_name) if transmittal_mapping else None
+            if mapped_val:
+                display_label = mapped_val[7:] if mapped_val.startswith("STATIC:") else mapped_val
+            else:
+                display_label = tag_name.replace('_', ' ').title()
+            cell.text = display_label
+        else:
+            col_tags[col_i] = raw_text
+
     has_sample_row = len(table.rows) > sample_row_idx
     col_formats = []
     for col_idx in range(len(table.columns)):
@@ -135,30 +200,18 @@ def populate_transmittal_table(docx_obj, farmers: list[dict]):
             pass
         col_formats.append(fmt)
 
-    for i, farmer in enumerate(farmers):
+    for i, farmer in enumerate(farmers_list):
         if i == 0 and has_sample_row:
             row_cells = table.rows[sample_row_idx].cells
         else:
             row_cells = table.add_row().cells
 
-        for col_i, header_name in enumerate(headers_in_table):
+        for col_i in range(len(table.columns)):
             if col_i >= len(row_cells):
                 break
-            val = ""
-            if 'barangay' in header_name or 'brgy' in header_name:
-                val = str(farmer.get('Barangay', ''))
-            elif 'name' in header_name:
-                val = str(farmer.get('Full_Name', ''))
-            elif 'birth' in header_name or 'bday' in header_name or 'date' in header_name:
-                val = str(farmer.get('Birthday', ''))
-            elif 'gender' in header_name or 'sex' in header_name:
-                val = str(farmer.get('Gender', ''))
-            elif 'ref' in header_name or 'id' in header_name or 'no' in header_name:
-                val = str(farmer.get('Reference_No', ''))
-            else:
-                val = str(farmer.get('Full_Name', ''))
-            
-            row_cells[col_i].text = val
+            tag_key = col_tags.get(col_i, "")
+            val = _get_farmer_val(farmer, tag_key, transmittal_mapping)
+            row_cells[col_i].text = str(val) if val is not None else ""
 
         for col_idx, cell in enumerate(row_cells):
             if col_idx < len(col_formats):
@@ -178,10 +231,10 @@ def _generate_one_pdf(args: tuple):
     """
     Worker function (runs in a separate process):
       1. Fills the .docx template for a single farmer row or transmittal.
-      2. Converts the filled .docx to PDF via LibreOffice.
+      2. Converts the filled .docx to PDF via LibreOffice (parallel) or MS Word COM (process locked).
       3. Returns (worker_idx, pdf_path | None, error_message | None).
     """
-    worker_idx, context, template_file, temp_dir_str, lo_profile_base_str = args
+    worker_idx, context, template_file, temp_dir_str, lo_profile_base_str, com_lock = args
 
     temp_dir        = Path(temp_dir_str)
     lo_profile_base = Path(lo_profile_base_str)
@@ -198,6 +251,12 @@ def _generate_one_pdf(args: tuple):
 
     try:
         doc = DocxTemplate(template_file)
+        doc.init_docx()
+
+        # Transmittal list table injection if farmers array is present (BEFORE doc.render)
+        if 'farmers' in context and doc.docx.tables:
+            _populate_transmittal_table(doc.docx.tables[0], context['farmers'], context.get('_transmittal_mapping'))
+
         doc.render(context)
         
         # Enforce A4 page bounds on sections
@@ -206,32 +265,71 @@ def _generate_one_pdf(args: tuple):
             section.page_height = Mm(297)
             
         # Transmittal list table injection if farmers array is present
-        if 'farmers' in context:
-            populate_transmittal_table(doc.docx, context['farmers'])
+        if 'farmers' in context and doc.docx.tables:
+            _populate_transmittal_table(doc.docx.tables[0], context['farmers'], context.get('_transmittal_mapping'))
 
         doc.save(temp_docx_path)
 
-        # Headless LibreOffice conversion
-        with open(lo_log_path, "w") as log_f:
-            result = subprocess.run(
-                [
-                    "libreoffice",
-                    f"-env:UserInstallation={lo_profile_url}",
-                    "--headless",
-                    "--convert-to", "pdf",
-                    str(temp_docx_path),
-                    "--outdir", str(temp_dir),
-                ],
-                stdout=log_f,
-                stderr=log_f,
-                check=False,
-            )
+        # Convert .docx to PDF (LibreOffice or MS Word COM)
+        lo_bin = shutil.which("libreoffice") or shutil.which("soffice")
+        if not lo_bin:
+            for loc in [
+                r"C:\Program Files\LibreOffice\program\soffice.exe",
+                r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+            ]:
+                if os.path.exists(loc):
+                    lo_bin = loc
+                    break
 
-        if result.returncode != 0 or not temp_pdf_path.exists():
-            lo_log = lo_log_path.read_text(errors="replace").strip()
+        if lo_bin:
+            with open(lo_log_path, "w") as log_f:
+                result = subprocess.run(
+                    [
+                        lo_bin,
+                        f"-env:UserInstallation={lo_profile_url}",
+                        "--headless",
+                        "--convert-to", "pdf",
+                        str(temp_docx_path.resolve()),
+                        "--outdir", str(temp_dir.resolve()),
+                    ],
+                    stdout=log_f,
+                    stderr=log_f,
+                    check=False,
+                )
+            if result.returncode == 0 and temp_pdf_path.exists():
+                return worker_idx, temp_pdf_path, None
+            lo_log = lo_log_path.read_text(errors="replace").strip() if lo_log_path.exists() else ""
             return worker_idx, None, f"LibreOffice rc={result.returncode}:\n{lo_log}"
 
-        return worker_idx, temp_pdf_path, None
+        if os.name == 'nt':
+            if com_lock:
+                com_lock.acquire()
+            try:
+                import win32com.client as win32
+                import pythoncom
+                pythoncom.CoInitialize()
+                word = None
+                try:
+                    word = win32.DispatchEx("Word.Application")
+                    word.Visible = False
+                    word.DisplayAlerts = 0
+                    doc = word.Documents.Open(str(temp_docx_path.resolve()), ReadOnly=True)
+                    doc.SaveAs(str(temp_pdf_path.resolve()), FileFormat=17)
+                    doc.Close(0)
+                    if temp_pdf_path.exists():
+                        return worker_idx, temp_pdf_path, None
+                finally:
+                    if word:
+                        try:
+                            word.Quit()
+                        except Exception:
+                            pass
+                    pythoncom.CoUninitialize()
+            finally:
+                if com_lock:
+                    com_lock.release()
+
+        return worker_idx, None, "No PDF engine available (LibreOffice or MS Word required)."
 
     except Exception as exc:
         return worker_idx, None, str(exc)
@@ -310,6 +408,10 @@ def run_batch_generation(
         log(f"Grouping dataset by: {' > '.join(group_keys)}")
         grouped = df.groupby(group_keys)
 
+    import multiprocessing
+    manager = multiprocessing.Manager()
+    com_lock = manager.Lock()
+
     jobs: list[tuple] = []
     job_meta: list[tuple] = []
     lo_profile_base = str((tmp_path / "lo_profiles").resolve())
@@ -335,39 +437,15 @@ def run_batch_generation(
         # 1. Transmittal Data
         farmers_list = []
         for _, row in group_df.iterrows():
-            r_d = row.to_dict()
-            ctx = _build_context(r_d, transmittal_mapping)
-
-            def find_val(candidates):
-                for c in candidates:
-                    if c in ctx and ctx[c]:
-                        return ctx[c]
-                    s_c = sanitize_key(c)
-                    if s_c in ctx and ctx[s_c]:
-                        return ctx[s_c]
-                    for r_k, r_v in r_d.items():
-                        if str(r_k).strip().lower() == c.lower() and pd.notna(r_v) and str(r_v).strip():
-                            return str(r_v).strip()
-                return ""
-
-            fn = find_val(['Full_Name', 'Full Name', 'Farmer Name', 'Name', 'Farmer_Name'])
-            if not fn:
-                fname = find_val(['First Name', 'First_Name', 'Fname'])
-                lname = find_val(['Last Name', 'Last_Name', 'Lname'])
-                if fname or lname:
-                    fn = f"{lname}, {fname}".strip(', ')
-
-            bd = find_val(['Birth_Date', 'Birthdate', 'Birthday', 'Birth Date', 'DOB', 'Bday'])
-            gen = find_val(['Gender', 'Sex'])
-            ref = find_val(['Reference_No', 'Reference No.', 'Reference No', 'Ref No', 'Farmer ID', 'Farmer_ID', 'ID'])
-
-            farmers_list.append({
-                'Barangay': brgy_name,
-                'Full_Name': fn,
-                'Birthday': str(bd) if bd else '',
-                'Gender': str(gen) if gen else '',
-                'Reference_No': str(ref) if ref else ''
-            })
+            ctx = _build_context(row.to_dict(), transmittal_mapping)
+            ctx['Barangay'] = brgy_name
+            if 'Full_Name' not in ctx:
+                ctx['Full_Name'] = ctx.get('Fullname', ctx.get('Name', ''))
+            if 'Birthday' not in ctx:
+                ctx['Birthday'] = ctx.get('Birthdate', ctx.get('Birth_Date', ''))
+            if 'Reference_No' not in ctx:
+                ctx['Reference_No'] = ctx.get('Reference_No.', ctx.get('ID', ''))
+            farmers_list.append(ctx)
 
         # 2. Submit Transmittal Job
         transmittal_idx = len(jobs)
@@ -375,7 +453,8 @@ def run_batch_generation(
             'barangay': brgy_name,
             'municipality': muni_name,
             'province': prov_name,
-            'farmers': farmers_list
+            'farmers': farmers_list,
+            '_transmittal_mapping': transmittal_mapping
         }
         if transmittal_mapping:
             for tag, val in transmittal_mapping.items():
@@ -387,6 +466,7 @@ def run_batch_generation(
             transmittal_template,
             str(tmp_path.resolve()),
             lo_profile_base,
+            com_lock,
         ))
         job_meta.append((prov_name, muni_name, brgy_name, True))
 
@@ -399,6 +479,7 @@ def run_batch_generation(
                 template_file,
                 str(tmp_path.resolve()),
                 lo_profile_base,
+                com_lock,
             ))
             job_meta.append((prov_name, muni_name, brgy_name, False))
 

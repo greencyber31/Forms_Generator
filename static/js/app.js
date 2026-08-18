@@ -232,35 +232,39 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    let saveMappingTimer = null;
     function saveCurrentMappings() {
-        const mapping = {};
-        document.querySelectorAll('.mapping-row-item').forEach(row => {
-            const tag = row.getAttribute('data-tag');
-            const select = row.querySelector('.match-select');
-            const input = row.querySelector('.custom-value-input');
+        clearTimeout(saveMappingTimer);
+        saveMappingTimer = setTimeout(() => {
+            const mapping = {};
+            document.querySelectorAll('.mapping-row-item').forEach(row => {
+                const tag = row.getAttribute('data-tag');
+                const select = row.querySelector('.match-select');
+                const input = row.querySelector('.custom-value-input');
 
-            if (select && select.value === '__CUSTOM__') {
-                const staticText = input ? input.value : '';
-                mapping[tag] = `STATIC:${staticText}`;
-            } else if (select && select.value) {
-                mapping[tag] = select.value;
-            }
-        });
+                if (select && select.value === '__CUSTOM__') {
+                    const staticText = input ? input.value : '';
+                    mapping[tag] = `STATIC:${staticText}`;
+                } else if (select && select.value) {
+                    mapping[tag] = select.value;
+                }
+            });
 
-        workspace.mappings[activePreviewType] = mapping;
+            workspace.mappings[activePreviewType] = mapping;
 
-        fetch('/api/template/mapping', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                doc_type: activePreviewType,
-                mapping: mapping
+            fetch('/api/template/mapping', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    doc_type: activePreviewType,
+                    mapping: mapping
+                })
             })
-        })
-        .then(res => res.json())
-        .then(data => {
-            reloadSamplePdfPreview(activePreviewType);
-        });
+            .then(res => res.json())
+            .then(data => {
+                reloadSamplePdfPreview(activePreviewType);
+            });
+        }, 300);
     }
 
     function triggerAutoMatch() {
