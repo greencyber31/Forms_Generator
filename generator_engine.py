@@ -162,14 +162,22 @@ def _calculate_smart_column_widths(active_cols: list[dict], farmers_list: list[d
             if val:
                 max_val_len = max(max_val_len, len(str(val)))
 
-        if (max_val_len <= 3 and ('gender' in h_clean or 'sex' in h_clean or 'suffix' in h_clean)) or h_clean in {'m/f', 'g'}:
-            score = 6.0
+        # Priority 1: Single char / short code fields (Gender, Sex, Suffix)
+        if (max_val_len <= 3 and ('gender' in h_clean or 'sex' in h_clean or 'suffix' in h_clean)) or h_clean in {'m/f', 'g', 'sex'}:
+            score = 4.5
+        # Priority 2: Hyphenated Reference / RSBSA / ID codes (e.g. 10-13-02-017-000405 = 19 chars)
         elif 'ref' in h_clean or 'rsbsa' in h_clean or 'id' in h_clean or max_val_len >= 16:
-            score = max(max_val_len, len(h_name)) * 1.55
-        elif 'date' in h_clean or 'birth' in h_clean or max_val_len == 10:
-            score = max(max_val_len, 10) * 1.05
+            score = max(max_val_len, 18) * 1.85
+        # Priority 3: Dates (05/24/1991 = 10 chars)
+        elif 'date' in h_clean or 'birth' in h_clean:
+            score = 10.0 * 1.05
+        # Priority 4: Municipality / Barangay (Data length is short e.g. DAMULOG, SAMPAGAR)
+        elif 'muni' in h_clean or 'brgy' in h_clean or 'barangay' in h_clean or 'town' in h_clean:
+            score = max(max_val_len, 7) * 1.1
+        # Priority 5: Standard Names / Text
         else:
             score = max(max_val_len, len(h_name), 8) * 1.25
+
         scores.append(score)
 
     total_score = sum(scores)
@@ -182,11 +190,13 @@ def _calculate_smart_column_widths(active_cols: list[dict], farmers_list: list[d
     for idx, col_info in enumerate(active_cols):
         h_clean = str(col_info.get("header", "")).lower().strip()
         w = raw_widths[idx]
-        if 'gender' in h_clean or 'sex' in h_clean or 'suffix' in h_clean:
-            w = min(w, 13.0)
-            w = max(w, 9.0)
+        if 'gender' in h_clean or 'sex' in h_clean or 'suffix' in h_clean or h_clean in {'m/f', 'g'}:
+            w = min(w, 10.5)
+            w = max(w, 7.5)
         elif 'ref' in h_clean or 'rsbsa' in h_clean:
-            w = max(w, 40.0)
+            w = max(w, 34.0)
+        elif 'date' in h_clean or 'birth' in h_clean:
+            w = max(w, 16.5)
         final_widths.append(w)
 
     final_sum = sum(final_widths)
@@ -307,17 +317,26 @@ def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_map
                 val = _get_farmer_val(farmer, header_name, transmittal_mapping)
                 row_cells[col_i].text = str(val) if val is not None else ""
 
-            for col_idx, cell in enumerate(row_cells):
-                if col_idx < len(col_formats):
-                    fmt = col_formats[col_idx]
-                    for p in cell.paragraphs:
-                        for r in p.runs:
-                            if fmt['name']:
-                                r.font.name = fmt['name']
-                            if fmt['size']:
-                                r.font.size = fmt['size']
-                            if fmt['bold'] is not None:
-                                r.bold = fmt['bold']
+        # Dynamic font size scaling based on column count to ensure zero wrapping
+        from docx.shared import Pt
+        if target_count <= 5:
+            auto_font_size = Pt(9.5)
+        elif target_count <= 7:
+            auto_font_size = Pt(8.5)
+        elif target_count <= 9:
+            auto_font_size = Pt(7.5)
+        else:
+            auto_font_size = Pt(6.5)
+
+        for row in table.rows:
+            for col_idx, cell in enumerate(row.cells):
+                for p in cell.paragraphs:
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    for r in p.runs:
+                        r.font.size = auto_font_size
+                        if col_idx < len(col_formats) and col_formats[col_idx]['name']:
+                            r.font.name = col_formats[col_idx]['name']
 
         # Rebuild XML tblGrid and cell widths to force Word & LibreOffice to respect dynamic column widths
         _apply_xml_table_column_widths(table, col_widths_mm)
