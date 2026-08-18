@@ -507,6 +507,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function reloadSamplePdfPreview(type) {
         const iframe = document.getElementById('pdf-preview-frame');
+        const overlay = document.getElementById('pdf-loading-overlay');
+        const btnRefreshIcon = document.querySelector('#btn-refresh-preview i');
+
+        if (overlay) overlay.classList.add('active');
+        if (btnRefreshIcon) btnRefreshIcon.classList.add('fa-spin');
+
+        iframe.onload = () => {
+            if (overlay) overlay.classList.remove('active');
+            if (btnRefreshIcon) btnRefreshIcon.classList.remove('fa-spin');
+        };
+
         iframe.src = `/api/template/pdf-preview?type=${type}&t=${Date.now()}`;
     }
 
