@@ -1,0 +1,26 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Output and temporary directories
+output/
+output_test_transmittal/
+temp_docs/
+temp_test_multi/
+uploads/*
+!uploads/.gitkeep
+
+# IDEs and OS metadata
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.tmp
+*.log

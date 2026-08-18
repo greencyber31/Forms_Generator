@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PCIC Form Studio
+Comment=Launch PCIC Form Automation & PDF Studio
+Exec=/home/deck/Documents/coding/Forms_Generator/launch_app.sh
+Icon=document-print-preview
+Terminal=false
+Categories=Utility;Application;

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PCIC Form Automation & Batch Processing Suite</title>
+    <!-- Google Fonts & Font Awesome Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Navigation Header -->
+        <header class="app-header">
+            <div class="brand">
+                <div class="brand-icon">
+                    <i class="fa-solid fa-file-pdf"></i>
+                </div>
+                <div class="brand-text">
+                    <h1>PCIC Form Studio</h1>
+                    <span>Dynamic Batch PDF & Transmittal Engine</span>
+                </div>
+            </div>
+
+            <!-- Wizard Stepper Nav -->
+            <nav class="wizard-nav">
+                <div class="step-item active" id="step-nav-1" data-step="1">
+                    <span class="step-num">1</span>
+                    <span class="step-label">Upload Assets</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" id="step-nav-2" data-step="2">
+                    <span class="step-num">2</span>
+                    <span class="step-label">Tag Connector</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" id="step-nav-3" data-step="3">
+                    <span class="step-num">3</span>
+                    <span class="step-label">Grouping Rules</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" id="step-nav-4" data-step="4">
+                    <span class="step-num">4</span>
+                    <span class="step-label">Process & Bundles</span>
+                </div>
+            </nav>
+
+            <div class="header-actions">
+                <button class="btn btn-outline" id="btn-open-output">
+                    <i class="fa-regular fa-folder-open"></i> Open Output Folder
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Workspace Body -->
+        <main class="app-main">
+            
+            <!-- STEP 1: UPLOAD ASSETS -->
+            <section class="wizard-step active" id="step-1-content">
+                <div class="step-header">
+                    <h2>Step 1: Upload Source Files & Templates</h2>
+                    <p>Provide your Excel farmer list and the Word document templates for application forms and transmittal summaries.</p>
+                </div>
+
+                <div class="upload-grid">
+                    <!-- Excel File Upload -->
+                    <div class="upload-card" id="card-excel">
+                        <div class="card-icon excel">
+                            <i class="fa-solid fa-file-excel"></i>
+                        </div>
+                        <h3>1. Excel Farmer Data</h3>
+                        <p class="file-desc">Contains farmer details and location columns.</p>
+                        <div class="drop-zone" id="drop-excel">
+                            <input type="file" id="input-excel" accept=".xlsx, .xls" hidden>
+                            <i class="fa-solid fa-cloud-arrow-up"></i>
+                            <span>Drag & Drop or <strong>Browse Excel</strong></span>
+                        </div>
+                        <div class="status-badge" id="status-excel">
+                            <i class="fa-solid fa-circle-check"></i> <span id="name-excel">Not loaded</span>
+                        </div>
+                    </div>
+
+                    <!-- Application Form Template Upload -->
+                    <div class="upload-card" id="card-template">
+                        <div class="card-icon template">
+                            <i class="fa-solid fa-file-word"></i>
+                        </div>
+                        <h3>2. Application Form Template</h3>
+                        <p class="file-desc">Word (.docx) template containing Jinja tags (e.g. <code>&#123;&#123; Last_Name &#125;&#125;</code>).</p>
+                        <div class="drop-zone" id="drop-template">
+                            <input type="file" id="input-template" accept=".docx" hidden>
+                            <i class="fa-solid fa-cloud-arrow-up"></i>
+                            <span>Drag & Drop or <strong>Browse Template</strong></span>
+                        </div>
+                        <div class="status-badge" id="status-template">
+                            <i class="fa-solid fa-circle-check"></i> <span id="name-template">Not loaded</span>
+                        </div>
+                    </div>
+
+                    <!-- Transmittal Template Upload -->
+                    <div class="upload-card" id="card-transmittal">
+                        <div class="card-icon transmittal">
+                            <i class="fa-solid fa-file-lines"></i>
+                        </div>
+                        <h3>3. Transmittal List Template</h3>
+                        <p class="file-desc">Word (.docx) template with table for summary bundles.</p>
+                        <div class="drop-zone" id="drop-transmittal">
+                            <input type="file" id="input-transmittal" accept=".docx" hidden>
+                            <i class="fa-solid fa-cloud-arrow-up"></i>
+                            <span>Drag & Drop or <strong>Browse Transmittal</strong></span>
+                        </div>
+                        <div class="status-badge" id="status-transmittal">
+                            <i class="fa-solid fa-circle-check"></i> <span id="name-transmittal">Not loaded</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wizard-footer">
+                    <button class="btn btn-primary btn-lg" id="btn-to-step-2">
+                        Next: Tag Connector & Field Mapper <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </div>
+            </section>
+
+            <!-- STEP 2: TAG CONNECTOR & FIELD MAPPER -->
+            <section class="wizard-step" id="step-2-content">
+                <div class="step-header">
+                    <h2>Step 2: Tag Connector & Field Mapper</h2>
+                    <p>Connect Word document tags directly to your Excel columns with 1-click auto-matching and live PDF preview.</p>
+                </div>
+
+                <div class="tag-connector-layout">
+                    <!-- Left Column: Interactive Field Mapping Table -->
+                    <div class="mapping-table-panel">
+                        <div class="mapping-toolbar">
+                            <div class="tab-selectors">
+                                <button class="tab-btn active" id="tab-app-template">
+                                    <i class="fa-solid fa-file-word"></i> Application Form Template
+                                </button>
+                                <button class="tab-btn" id="tab-trans-template">
+                                    <i class="fa-solid fa-file-lines"></i> Transmittal List Template
+                                </button>
+                            </div>
+                            <div class="mapping-actions">
+                                <button class="btn btn-sm btn-accent" id="btn-auto-match">
+                                    <i class="fa-solid fa-bolt"></i> Auto-Match Tags
+                                </button>
+                                <button class="btn btn-sm btn-outline" id="btn-reset-match">
+                                    <i class="fa-solid fa-rotate-left"></i> Reset
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Detected Tags Summary Bar -->
+                        <div class="detected-tags-bar">
+                            <span><i class="fa-solid fa-tags"></i> Scanned Word Tags:</span>
+                            <span class="badge" id="tag-count-badge">0 Tags Detected</span>
+                        </div>
+
+                        <!-- Mapping Rows Container -->
+                        <div class="mapping-rows-box" id="mapping-rows-container">
+                            <p style="color:var(--text-muted); padding:1rem;"><i class="fa-solid fa-spinner fa-spin"></i> Scanning tags and building field connectors...</p>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Live 1:1 Sample PDF Preview Panel -->
+                    <div class="sample-preview-panel">
+                        <div class="preview-header">
+                            <div class="preview-header-info">
+                                <h3><i class="fa-solid fa-file-pdf"></i> Live 1:1 Sample PDF Preview</h3>
+                                <span class="preview-hint">Renders Row 1 data from your Excel file in real-time</span>
+                            </div>
+                            <button class="btn btn-sm btn-outline" id="btn-refresh-preview">
+                                <i class="fa-solid fa-arrows-rotate"></i> Refresh Preview
+                            </button>
+                        </div>
+                        <div class="pdf-preview-box">
+                            <iframe id="pdf-preview-frame" src="about:blank" class="pdf-frame"></iframe>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wizard-footer">
+                    <button class="btn btn-secondary" id="btn-back-to-step-1">
+                        <i class="fa-solid fa-arrow-left"></i> Back to Assets
+                    </button>
+                    <button class="btn btn-primary btn-lg" id="btn-to-step-3">
+                        Next: Configure Grouping Rules <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </div>
+            </section>
+
+            <!-- STEP 3: GROUPING RULES & FOLDER SEGREGATION -->
+            <section class="wizard-step" id="step-3-content">
+                <div class="step-header">
+                    <h2>Step 3: Dynamic Folder Segregation & PDF Bundle Rules</h2>
+                    <p>Customize how the app creates folders and bundles farmer forms into single merged PDFs.</p>
+                </div>
+
+                <div class="grouping-config-card">
+                    <div class="config-row">
+                        <div class="config-info">
+                            <div class="config-icon"><i class="fa-solid fa-folder-tree"></i></div>
+                            <div>
+                                <h3>Primary Folder Header</h3>
+                                <p>Creates the top-level directory in <code>output/</code>.</p>
+                            </div>
+                        </div>
+                        <div class="config-input">
+                            <select id="select-primary-group" class="form-select">
+                                <option value="">Loading headers...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="config-row">
+                        <div class="config-info">
+                            <div class="config-icon"><i class="fa-solid fa-folder"></i></div>
+                            <div>
+                                <h3>Secondary Subfolder Header</h3>
+                                <p>Creates inner subdirectories (e.g. <code>output/Province, Municipality/</code>).</p>
+                            </div>
+                        </div>
+                        <div class="config-input">
+                            <select id="select-secondary-group" class="form-select">
+                                <option value="">Loading headers...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="config-row highlighted">
+                        <div class="config-info">
+                            <div class="config-icon bundle"><i class="fa-solid fa-file-pdf"></i></div>
+                            <div>
+                                <h3>PDF Bundle Grouping Header (File Level)</h3>
+                                <p>Bundles farmer rows into a single merged PDF file containing Transmittal + Forms.</p>
+                            </div>
+                        </div>
+                        <div class="config-input">
+                            <select id="select-bundle-group" class="form-select">
+                                <option value="">Loading headers...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Parallel Workers & Limits -->
+                    <div class="config-grid-2">
+                        <div class="config-box">
+                            <label for="input-max-workers"><i class="fa-solid fa-microchip"></i> Parallel CPU Workers</label>
+                            <input type="number" id="input-max-workers" value="4" min="1" max="16" class="form-input">
+                            <span class="input-hint">Default 4 workers. Increase for faster CPU rendering.</span>
+                        </div>
+
+                        <div class="config-box">
+                            <label for="input-test-limit"><i class="fa-solid fa-vial"></i> Test Limit (Optional)</label>
+                            <input type="number" id="input-test-limit" placeholder="Leave empty for ALL rows" class="form-input">
+                            <span class="input-hint">Set to e.g. 10 to test run the first 10 rows.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wizard-footer">
+                    <button class="btn btn-secondary" id="btn-back-to-step-2">
+                        <i class="fa-solid fa-arrow-left"></i> Back to Tag Connector
+                    </button>
+                    <button class="btn btn-accent btn-lg" id="btn-to-step-4">
+                        <i class="fa-solid fa-play"></i> Next: Start Batch Processing
+                    </button>
+                </div>
+            </section>
+
+            <!-- STEP 4: LIVE PROCESSING & BUNDLE DASHBOARD -->
+            <section class="wizard-step" id="step-4-content">
+                <div class="step-header">
+                    <h2>Step 4: Real-Time Batch Processing Dashboard</h2>
+                    <p>Live progress tracking, parallel worker execution status, and PDF bundle merging updates.</p>
+                </div>
+
+                <div class="dashboard-grid">
+                    <!-- Progress Card -->
+                    <div class="dash-card main-progress">
+                        <div class="progress-header">
+                            <div class="progress-title">
+                                <span class="pulse-indicator" id="execution-pulse"></span>
+                                <h3 id="progress-status-text">Ready to start generation</h3>
+                            </div>
+                            <span class="progress-percentage" id="progress-percent-val">0%</span>
+                        </div>
+
+                        <!-- Progress Bar -->
+                        <div class="progress-bar-track">
+                            <div class="progress-bar-fill" id="progress-fill"></div>
+                        </div>
+
+                        <div class="stats-row">
+                            <div class="stat-box">
+                                <span class="stat-num" id="stat-completed">0</span>
+                                <span class="stat-label">Rendered PDFs</span>
+                            </div>
+                            <div class="stat-box">
+                                <span class="stat-num" id="stat-total">0</span>
+                                <span class="stat-label">Total Jobs</span>
+                            </div>
+                            <div class="stat-box warning">
+                                <span class="stat-num" id="stat-failed">0</span>
+                                <span class="stat-label">Failed Rows</span>
+                            </div>
+                        </div>
+
+                        <div class="action-bar-dash">
+                            <button class="btn btn-success btn-lg" id="btn-start-process">
+                                <i class="fa-solid fa-bolt"></i> Execute Batch Processing
+                            </button>
+                            <button class="btn btn-outline" id="btn-dash-open-output">
+                                <i class="fa-solid fa-folder-open"></i> Browse Output Folder
+                            </button>
+                            <button class="btn btn-primary" id="btn-restart-process" style="display: none;">
+                                <i class="fa-solid fa-rotate-left"></i> Start New Batch / Back to Step 1
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Live Event Log Drawer -->
+                    <div class="dash-card log-card">
+                        <div class="log-header">
+                            <h3><i class="fa-solid fa-terminal"></i> Live Execution Terminal Log</h3>
+                            <button class="btn btn-xs btn-outline" id="btn-clear-logs">Clear Logs</button>
+                        </div>
+                        <div class="log-stream-box" id="log-container">
+                            <div class="log-line info">[00:00:00] System initialized. Click "Execute Batch Processing" to run.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wizard-footer">
+                    <button class="btn btn-secondary" id="btn-back-to-step-3">
+                        <i class="fa-solid fa-arrow-left"></i> Back to Grouping Rules
+                    </button>
+                    <button class="btn btn-primary" id="btn-footer-restart-process" style="display: none;">
+                        <i class="fa-solid fa-rotate-left"></i> Start New Batch (Back to Step 1)
+                    </button>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Notification Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
