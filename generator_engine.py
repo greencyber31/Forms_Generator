@@ -194,6 +194,41 @@ def _calculate_smart_column_widths(active_cols: list[dict], farmers_list: list[d
 
     return normalized_widths
 
+def _apply_xml_table_column_widths(table, col_widths_mm: list[float]):
+    """
+    Rebuilds the Word document XML <w:tblGrid> and <w:tcW> for every cell in every row.
+    This forces Microsoft Word and LibreOffice to strictly honor dynamic column widths 
+    rather than rendering the original hardcoded table grid from the .docx template file.
+    """
+    if not col_widths_mm:
+        return
+
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    widths_dxa = [int(w * 56.6929) for w in col_widths_mm]
+
+    # 1. Rebuild <w:tblGrid>
+    tblGrid = table._tbl.tblGrid
+    tblGrid.clear()
+    for dxa in widths_dxa:
+        gridCol = OxmlElement('w:gridCol')
+        gridCol.set(qn('w:w'), str(dxa))
+        tblGrid.append(gridCol)
+
+    # 2. Update <w:tcW> for every row & cell
+    for row in table.rows:
+        for col_idx, dxa in enumerate(widths_dxa):
+            if col_idx < len(row.cells):
+                cell = row.cells[col_idx]
+                tcPr = cell._tc.get_or_add_tcPr()
+                tcW = tcPr.find(qn('w:tcW'))
+                if tcW is None:
+                    tcW = OxmlElement('w:tcW')
+                    tcPr.append(tcW)
+                tcW.set(qn('w:w'), str(dxa))
+                tcW.set(qn('w:type'), 'dxa')
+
 def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_mapping: dict | None = None, transmittal_columns: list[dict] | None = None):
     if not farmers_list:
         return
@@ -284,11 +319,8 @@ def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_map
                             if fmt['bold'] is not None:
                                 r.bold = fmt['bold']
 
-        # Enforce exact smart width on every row & cell to maintain strict A4 margins (160mm total)
-        for row in table.rows:
-            for col_i, w_mm in enumerate(col_widths_mm):
-                if col_i < len(row.cells):
-                    row.cells[col_i].width = Mm(w_mm)
+        # Rebuild XML tblGrid and cell widths to force Word & LibreOffice to respect dynamic column widths
+        _apply_xml_table_column_widths(table, col_widths_mm)
 
         _ensure_table_borders(table)
         return
