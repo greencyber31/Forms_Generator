@@ -28,6 +28,12 @@ def safe_filename(name: str) -> str:
     """Replace all OS-reserved / path-unsafe characters in a filename segment."""
     return str(name).translate(_UNSAFE_CHARS).strip()
 
+def _get_underline_str(tag: str) -> str:
+    tag_lower = tag.lower()
+    if any(k in tag_lower for k in ['area', 'suffix', 'lot', 'sex', 'gender', 'civil']):
+        return "__________"
+    return "________________"
+
 def _build_context(row_dict: dict, mapping: dict | None = None) -> dict:
     """Convert a raw row dictionary into a clean Jinja2 rendering context using mapped tags."""
     context = {}
@@ -46,7 +52,9 @@ def _build_context(row_dict: dict, mapping: dict | None = None) -> dict:
         for tag, excel_col in mapping.items():
             if not excel_col:
                 continue
-            if isinstance(excel_col, str) and excel_col.startswith("STATIC:"):
+            if isinstance(excel_col, str) and (excel_col == "__BLANK_UNDERLINE__" or excel_col == "UNDERLINE:"):
+                context[tag] = _get_underline_str(tag)
+            elif isinstance(excel_col, str) and excel_col.startswith("STATIC:"):
                 context[tag] = excel_col[7:]
             elif excel_col in row_dict:
                 val = row_dict[excel_col]
@@ -96,6 +104,8 @@ def _get_farmer_val(farmer: dict, tag_key: str, mapping: dict | None = None) -> 
 
     mapped_col = mapping.get(tag_key) if mapping else None
     if mapped_col:
+        if isinstance(mapped_col, str) and (mapped_col == "__BLANK_UNDERLINE__" or mapped_col == "UNDERLINE:"):
+            return "____________"
         if isinstance(mapped_col, str) and mapped_col.startswith("STATIC:"):
             return mapped_col[7:]
         val = farmer.get(mapped_col, farmer.get(sanitize_key(mapped_col)))
@@ -295,8 +305,22 @@ def _populate_transmittal_table(table, farmers_list: list[dict], transmittal_map
         target_count = len(active_cols)
         col_widths_mm = _calculate_smart_column_widths(active_cols, farmers_list, total_width_mm=160.0)
 
-        while len(table.columns) < target_count:
-            table.add_column(Mm(col_widths_mm[min(len(table.columns), target_count - 1)]))
+        # 1. If table has more columns than target_count, trim extra cells from all rows
+        for row in table.rows:
+            while len(row.cells) > target_count:
+                tc = row.cells[-1]._tc
+                tc.getparent().remove(tc)
+
+        tblGrid = table._tbl.tblGrid
+        if tblGrid is not None:
+            while len(tblGrid) > target_count:
+                tblGrid.remove(tblGrid[-1])
+
+        # 2. If table has fewer columns than target_count, add extra columns
+        while len(table.rows[0].cells) < target_count:
+            col_idx = len(table.rows[0].cells)
+            w_mm = col_widths_mm[min(col_idx, target_count - 1)]
+            table.add_column(Mm(w_mm))
 
         header_cells = table.rows[header_row_idx].cells
         for col_i, col_info in enumerate(active_cols):
@@ -453,10 +477,6 @@ def _generate_one_pdf(args: tuple):
         for section in doc.docx.sections:
             section.page_width  = Mm(210)
             section.page_height = Mm(297)
-            
-        # Transmittal list table injection if farmers array is present
-        if 'farmers' in context and doc.docx.tables:
-            _populate_transmittal_table(doc.docx.tables[0], context['farmers'], context.get('_transmittal_mapping'), context.get('_transmittal_columns'))
 
         doc.save(temp_docx_path)
 

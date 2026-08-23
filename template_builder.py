@@ -1,5 +1,7 @@
 import re
 import os
+import json
+import hashlib
 import subprocess
 import shutil
 import uuid
@@ -125,8 +127,28 @@ def auto_match_tags(excel_headers: list[str], docx_tags: list[str]) -> dict[str,
 
     return mapping
 
+def compute_preview_signature(
+    excel_path: str,
+    docx_path: str,
+    mapping: dict[str, str],
+    transmittal_columns: list[dict] | None = None
+) -> str:
+    """Computes a deterministic hash signature representing the current preview state."""
+    components = []
+    if docx_path and os.path.exists(docx_path):
+        st = os.stat(docx_path)
+        components.append(f"docx:{docx_path}:{st.st_mtime}:{st.st_size}")
+    if excel_path and os.path.exists(excel_path):
+        st = os.stat(excel_path)
+        components.append(f"excel:{excel_path}:{st.st_mtime}:{st.st_size}")
+    components.append(f"mapping:{json.dumps(mapping or {}, sort_keys=True)}")
+    components.append(f"cols:{json.dumps(transmittal_columns or [], sort_keys=True)}")
+    
+    sig_str = "|".join(components)
+    return hashlib.sha256(sig_str.encode('utf-8')).hexdigest()[:20]
+
 def render_docx_to_pdf_preview(docx_path: str, temp_dir: str, output_name: str) -> str:
-    """Converts docx to high-fidelity PDF via LibreOffice or MS Word for 1:1 exact visual preview."""
+    """Converts docx to high-fidelity PDF via LibreOffice or MS Word using a persistent warm profile for speed."""
     try:
         out_dir = Path(temp_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -145,7 +167,8 @@ def render_docx_to_pdf_preview(docx_path: str, temp_dir: str, output_name: str) 
                     break
 
         if lo_bin:
-            profile_dir = (out_dir / f"profile_{output_name}").resolve()
+            # Use persistent warm profile directory to eliminate cold start overhead
+            profile_dir = (out_dir / "libreoffice_preview_profile").resolve()
             profile_dir.mkdir(parents=True, exist_ok=True)
             profile_url = profile_dir.as_uri()
 
@@ -210,9 +233,18 @@ def render_sample_pdf_preview(
 ) -> str:
     """
     Renders sample Row 1 data from Excel into the Word template using docxtpl,
-    then converts to PDF for live 1:1 previewing in the browser.
+    with smart signature caching to return instant (<0.05s) live previews.
     """
     try:
+        # Check instant signature cache first
+        cache_dir = Path(temp_dir) / "preview_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        sig = compute_preview_signature(excel_path, docx_path, mapping, transmittal_columns)
+        cached_pdf = cache_dir / f"{output_name}_{sig}.pdf"
+
+        if cached_pdf.exists() and cached_pdf.stat().st_size > 0:
+            return str(cached_pdf)
+
         docx_tags = extract_docx_tags(docx_path)
         context = {tag: "" for tag in docx_tags}
 
@@ -232,7 +264,10 @@ def render_sample_pdf_preview(
         else:
             for tag in docx_tags:
                 mapped_val = mapping.get(tag)
-                if mapped_val and isinstance(mapped_val, str) and mapped_val.startswith("STATIC:"):
+                if mapped_val and isinstance(mapped_val, str) and (mapped_val == "__BLANK_UNDERLINE__" or mapped_val == "UNDERLINE:"):
+                    from generator_engine import _get_underline_str
+                    context[tag] = _get_underline_str(tag)
+                elif mapped_val and isinstance(mapped_val, str) and mapped_val.startswith("STATIC:"):
                     context[tag] = mapped_val[7:]
 
         tpl = DocxTemplate(docx_path)
@@ -278,6 +313,13 @@ def render_sample_pdf_preview(
 
         pdf_path = render_docx_to_pdf_preview(str(filled_docx), temp_dir, f"{output_name}_{unique_id}")
         
+        # Save to permanent cache
+        if os.path.exists(pdf_path):
+            try:
+                shutil.copy2(pdf_path, str(cached_pdf))
+            except Exception:
+                pass
+
         # Clean up transient sample docx
         try:
             if os.path.exists(filled_docx):
@@ -285,6 +327,6 @@ def render_sample_pdf_preview(
         except Exception:
             pass
 
-        return pdf_path
+        return str(cached_pdf) if cached_pdf.exists() else pdf_path
     except Exception as e:
         raise ValueError(f"Failed to render sample PDF preview: {str(e)}")

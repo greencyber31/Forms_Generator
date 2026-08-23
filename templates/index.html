@@ -15,18 +15,19 @@
     <div class="app-container">
         <!-- Top Navigation Header -->
         <header class="app-header">
-            <div class="brand">
-                <div class="brand-icon">
-                    <i class="fa-solid fa-file-pdf"></i>
+            <div class="brand" id="brand-mode-toggle" title="Click icon to switch Mode (Form Generator ⟷ PDF Viewer)">
+                <div class="brand-icon clickable-mode-icon" id="app-mode-icon" role="button" tabindex="0">
+                    <i class="fa-solid fa-file-pdf" id="mode-icon-i"></i>
+                    <span class="mode-pulse-dot" title="Toggle Mode"></span>
                 </div>
                 <div class="brand-text">
-                    <h1>PCIC Form Studio</h1>
-                    <span>Dynamic Batch PDF & Transmittal Engine</span>
+                    <h1 id="app-brand-title">PCIC Form Studio</h1>
+                    <span id="app-brand-subtitle">Dynamic Batch PDF & Transmittal Engine</span>
                 </div>
             </div>
 
-            <!-- Wizard Stepper Nav -->
-            <nav class="wizard-nav">
+            <!-- Wizard Stepper Nav (Shown in Form Generator Mode) -->
+            <nav class="wizard-nav" id="wizard-nav-container">
                 <div class="step-item active" id="step-nav-1" data-step="1">
                     <span class="step-num">1</span>
                     <span class="step-label">Upload Assets</span>
@@ -48,7 +49,15 @@
                 </div>
             </nav>
 
+            <!-- Viewer Mode Nav (Shown in PDF Viewer Mode) -->
+            <div class="viewer-mode-nav" id="viewer-mode-nav" style="display:none;">
+                <span class="mode-indicator-pill"><i class="fa-solid fa-book-open-reader"></i> PDF Library & Viewer Mode</span>
+            </div>
+
             <div class="header-actions">
+                <button class="btn btn-mode-toggle" id="btn-header-mode-toggle" title="Switch Mode">
+                    <i class="fa-solid fa-layer-group"></i> <span id="btn-header-mode-label">PDF Viewer Mode</span>
+                </button>
                 <button class="btn btn-outline" id="btn-open-output">
                     <i class="fa-regular fa-folder-open"></i> Open Output Folder
                 </button>
@@ -57,6 +66,8 @@
 
         <!-- Main Workspace Body -->
         <main class="app-main">
+            <!-- VIEW MODE 1: FORM GENERATOR WIZARD -->
+            <div class="mode-view-container active" id="form-generator-view">
             
             <!-- STEP 1: UPLOAD ASSETS -->
             <section class="wizard-step active" id="step-1-content">
@@ -320,6 +331,9 @@
                             <button class="btn btn-success btn-lg" id="btn-start-process">
                                 <i class="fa-solid fa-bolt"></i> Execute Batch Processing
                             </button>
+                            <button class="btn btn-accent btn-lg" id="btn-jump-to-viewer-mode" style="display: none;">
+                                <i class="fa-solid fa-book-open-reader"></i> Open in PDF Viewer Mode
+                            </button>
                             <button class="btn btn-outline" id="btn-dash-open-output">
                                 <i class="fa-solid fa-folder-open"></i> Browse Output Folder
                             </button>
@@ -350,6 +364,88 @@
                     </button>
                 </div>
             </section>
+            </div> <!-- End of #form-generator-view -->
+
+            <!-- VIEW MODE 2: DEDICATED PDF LIBRARY & VIEWER (Triggered by Header Mode Button / Brand Icon) -->
+            <div class="mode-view-container" id="pdf-viewer-view" style="display: none;">
+                
+                <!-- STAGE 1: FULL-WIDTH OUTPUT DIRECTORY TREE & BUNDLE EXPLORER (Shown First) -->
+                <div class="output-explorer-section full-page-viewer" id="output-explorer-stage">
+                    <div class="explorer-section-header">
+                        <div class="explorer-title-box">
+                            <div class="explorer-icon"><i class="fa-solid fa-folder-tree"></i></div>
+                            <div>
+                                <h3>Output Directory & Generated PDF Bundles</h3>
+                                <p>Browse folders, search farmer details across all documents, and click any bundle to view.</p>
+                            </div>
+                        </div>
+                        <div class="explorer-actions">
+                            <div class="search-box">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="input-search-output" placeholder="Search bundles, barangays, farmer names..." class="form-input search-input">
+                                <button type="button" class="btn-clear-search" id="btn-clear-search" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                            <button class="btn btn-sm btn-outline" id="btn-refresh-output-tree">
+                                <i class="fa-solid fa-arrows-rotate"></i> Refresh Files
+                            </button>
+                            <button class="btn btn-sm btn-outline" id="btn-open-explorer-folder">
+                                <i class="fa-regular fa-folder-open"></i> Open Output Folder
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Full-Width Directory Explorer Card Container -->
+                    <div class="output-directory-explorer-card">
+                        <div class="tree-summary-bar">
+                            <span><i class="fa-solid fa-folder-open"></i> Generated Bundles Grouped by Location:</span>
+                            <span class="badge" id="output-total-badge">0 Files (0 B)</span>
+                        </div>
+                        <div class="output-tree-container full-explorer-list" id="output-tree-container">
+                            <div class="empty-tree-state">
+                                <i class="fa-regular fa-folder-open"></i>
+                                <p>No generated PDF files found in <code>output/</code> yet.<br>Execute batch processing in Form Generator to create PDF bundles.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STAGE 2: FULL-WIDTH DEDICATED PDF VIEWER (Shown after clicking a PDF bundle) -->
+                <div class="output-viewer-stage" id="output-viewer-stage" style="display: none;">
+                    <div class="viewer-top-bar" id="viewer-top-bar">
+                        <div class="viewer-left-group">
+                            <button type="button" class="btn btn-sm btn-outline btn-back-to-tree" id="btn-back-to-directory" title="Back to Directory">
+                                <i class="fa-solid fa-arrow-left"></i> Back to Directory
+                            </button>
+                            <div class="viewer-file-info">
+                                <span class="file-icon"><i class="fa-solid fa-file-pdf"></i></span>
+                                <div class="file-details">
+                                    <h4 id="viewer-file-name">Select a PDF bundle to view</h4>
+                                    <span id="viewer-file-meta" class="file-meta">Folder: -- | Size: --</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="viewer-actions" id="viewer-actions">
+                            <button type="button" id="btn-save-pdf-changes" class="btn btn-xs btn-success" title="Save text/drawings/annotations directly to the file on disk">
+                                <i class="fa-solid fa-floppy-disk"></i> Save Changes
+                            </button>
+                            <button type="button" id="btn-toggle-pdf-find" class="btn btn-xs btn-accent" title="Toggle Search / Find Bar inside PDF">
+                                <i class="fa-solid fa-magnifying-glass"></i> Find in PDF
+                            </button>
+                            <a href="#" id="btn-download-pdf" class="btn btn-xs btn-outline" download>
+                                <i class="fa-solid fa-download"></i> Download PDF
+                            </a>
+                            <button type="button" id="btn-open-file-folder" class="btn btn-xs btn-outline">
+                                <i class="fa-solid fa-folder"></i> Open Folder
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="viewer-frame-container full-screen-frame">
+                        <iframe id="output-pdf-frame" src="about:blank" class="output-pdf-iframe"></iframe>
+                    </div>
+                </div>
+
+            </div> <!-- End of #pdf-viewer-view -->
 
         </main>
     </div>

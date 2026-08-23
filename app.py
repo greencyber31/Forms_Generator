@@ -1,11 +1,14 @@
 import os
+import sys
 import json
 import queue
 import threading
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, Response, send_file, send_from_directory
 from werkzeug.utils import secure_filename
+from pypdf import PdfReader
 
 from template_builder import extract_excel_headers, extract_docx_tags, auto_match_tags, render_sample_pdf_preview, render_docx_to_pdf_preview
 from generator_engine import run_batch_generation
@@ -163,6 +166,8 @@ def upload_file():
         workspace_state["trans_docx_tags"] = extract_docx_tags(save_path)
         workspace_state["mappings"]["transmittal"] = auto_match_tags(excel_raw_headers, workspace_state["trans_docx_tags"])
 
+    trigger_background_preview_warmup()
+
     return jsonify({
         "message": f"Successfully uploaded {filename}",
         "file_type": file_type,
@@ -201,6 +206,7 @@ def handle_mapping():
         mapping = data.get('mapping', {})
 
         workspace_state["mappings"][doc_type] = mapping
+        trigger_background_preview_warmup()
         return jsonify({
             "message": f"Saved field mappings for {doc_type}!",
             "mapping": mapping
@@ -215,6 +221,7 @@ def auto_match_route():
 
     auto_map = auto_match_tags(excel_headers, docx_tags)
     workspace_state["mappings"][doc_type] = auto_map
+    trigger_background_preview_warmup()
 
     return jsonify({
         "message": f"Auto-matched {len(auto_map)} field tags!",
@@ -233,10 +240,37 @@ def handle_transmittal_columns():
         data = request.json
         cols = data.get('columns', [])
         workspace_state["transmittal_columns"] = cols
+        trigger_background_preview_warmup()
         return jsonify({
             "message": "Saved transmittal columns configuration!",
             "columns": cols
         })
+
+def _background_render_preview(doc_type: str):
+    try:
+        target_path = workspace_state["template_file"] if doc_type == 'template' else workspace_state["transmittal_template"]
+        excel_path = workspace_state["excel_file"]
+        mapping = workspace_state["mappings"].get(doc_type, {})
+        trans_cols = workspace_state.get("transmittal_columns", [])
+
+        if target_path and os.path.exists(target_path) and excel_path and os.path.exists(excel_path):
+            render_sample_pdf_preview(
+                excel_path,
+                target_path,
+                mapping,
+                app.config['TEMP_FOLDER'],
+                f"preview_{doc_type}",
+                transmittal_columns=trans_cols
+            )
+    except Exception:
+        pass
+
+def trigger_background_preview_warmup():
+    """Spawns non-blocking background threads to pre-render preview PDFs in advance."""
+    t1 = threading.Thread(target=_background_render_preview, args=('template',), daemon=True)
+    t2 = threading.Thread(target=_background_render_preview, args=('transmittal',), daemon=True)
+    t1.start()
+    t2.start()
 
 @app.route('/api/template/pdf-preview', methods=['GET'])
 def get_pdf_preview():
@@ -323,14 +357,321 @@ def stream_process():
 
     return Response(generate_events(), mimetype='text/event-stream')
 
+def format_size(size_bytes: int) -> str:
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    else:
+        return f"{size_bytes / (1024 * 1024):.2f} MB"
+
+def scan_output_directory(base_dir: str) -> dict:
+    base_path = Path(base_dir).resolve()
+    if not base_path.exists():
+        return {
+            "total_files": 0,
+            "total_folders": 0,
+            "total_size_bytes": 0,
+            "total_size_formatted": "0 B",
+            "folders": []
+        }
+
+    folders_dict = {}
+    root_files = []
+    total_files = 0
+    total_size = 0
+
+    for root, dirs, files in os.walk(base_path):
+        current_path = Path(root).resolve()
+        pdf_files = [f for f in files if f.lower().endswith('.pdf')]
+        if not pdf_files:
+            continue
+
+        rel_dir = os.path.relpath(current_path, base_path)
+        is_root = (rel_dir == '.')
+
+        file_list = []
+        folder_size = 0
+
+        for f_name in sorted(pdf_files):
+            f_path = current_path / f_name
+            try:
+                stat = f_path.stat()
+                f_size = stat.st_size
+                mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                f_size = 0
+                mtime = ""
+
+            total_files += 1
+            total_size += f_size
+            folder_size += f_size
+
+            rel_file_path = (Path(rel_dir) / f_name).as_posix() if not is_root else f_name
+
+            file_list.append({
+                "name": f_name,
+                "rel_path": rel_file_path,
+                "size_bytes": f_size,
+                "size_formatted": format_size(f_size),
+                "modified": mtime
+            })
+
+        if is_root:
+            root_files.extend(file_list)
+        else:
+            folder_name = os.path.basename(rel_dir)
+            folders_dict[rel_dir] = {
+                "name": folder_name,
+                "rel_path": Path(rel_dir).as_posix(),
+                "file_count": len(file_list),
+                "folder_size_bytes": folder_size,
+                "folder_size_formatted": format_size(folder_size),
+                "files": file_list
+            }
+
+    folders_list = []
+    if root_files:
+        folders_list.append({
+            "name": "Root Output",
+            "rel_path": ".",
+            "file_count": len(root_files),
+            "folder_size_bytes": sum(f["size_bytes"] for f in root_files),
+            "folder_size_formatted": format_size(sum(f["size_bytes"] for f in root_files)),
+            "files": root_files
+        })
+
+    for folder_info in sorted(folders_dict.values(), key=lambda x: x["name"].lower()):
+        folders_list.append(folder_info)
+
+    return {
+        "total_files": total_files,
+        "total_folders": len(folders_list),
+        "total_size_bytes": total_size,
+        "total_size_formatted": format_size(total_size),
+        "folders": folders_list
+    }
+
+@app.route('/api/output/tree', methods=['GET'])
+def get_output_tree():
+    out_dir = app.config['OUTPUT_FOLDER']
+    tree = scan_output_directory(out_dir)
+    return jsonify(tree)
+
+@app.route('/api/output/view-file', methods=['GET'])
+def view_output_file():
+    rel_path = request.args.get('path', '')
+    if not rel_path:
+        return jsonify({"error": "No file path provided"}), 400
+
+    out_base = Path(app.config['OUTPUT_FOLDER']).resolve()
+    target_path = (out_base / rel_path).resolve()
+
+    # Directory traversal prevention check
+    if not str(target_path).startswith(str(out_base)):
+        return jsonify({"error": "Access denied"}), 403
+
+    if not target_path.exists() or not target_path.is_file():
+        return jsonify({"error": "File not found"}), 404
+
+    return send_file(str(target_path), mimetype='application/pdf')
+
+@app.route('/api/output/download-file', methods=['GET'])
+def download_output_file():
+    rel_path = request.args.get('path', '')
+    if not rel_path:
+        return jsonify({"error": "No file path provided"}), 400
+
+    out_base = Path(app.config['OUTPUT_FOLDER']).resolve()
+    target_path = (out_base / rel_path).resolve()
+
+    if not str(target_path).startswith(str(out_base)):
+        return jsonify({"error": "Access denied"}), 403
+
+    if not target_path.exists() or not target_path.is_file():
+        return jsonify({"error": "File not found"}), 404
+
+    return send_file(str(target_path), as_attachment=True, download_name=target_path.name)
+
+@app.route('/api/output/save-pdf', methods=['POST'])
+def save_output_pdf():
+    rel_path = request.form.get('path', '').strip()
+    if not rel_path:
+        return jsonify({"error": "No file path provided"}), 400
+
+    if 'file' not in request.files:
+        return jsonify({"error": "No PDF file payload provided"}), 400
+
+    out_base = Path(app.config['OUTPUT_FOLDER']).resolve()
+    target_path = (out_base / rel_path).resolve()
+
+    if not str(target_path).startswith(str(out_base)):
+        return jsonify({"error": "Access denied"}), 403
+
+    if not target_path.parent.exists():
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    uploaded_file = request.files['file']
+    uploaded_file.save(str(target_path))
+
+    # Invalidate cache for this file
+    if str(target_path) in pdf_search_cache:
+        del pdf_search_cache[str(target_path)]
+
+    return jsonify({
+        "message": f"Successfully saved changes directly to {target_path.name}!",
+        "file_name": target_path.name,
+        "size_formatted": format_size(target_path.stat().st_size)
+    })
+
 @app.route('/api/output/open', methods=['POST'])
 def open_output_dir():
-    out_dir = app.config['OUTPUT_FOLDER']
+    data = request.json or {}
+    rel_folder = data.get('folder', '')
+    out_dir = Path(app.config['OUTPUT_FOLDER']).resolve()
+
+    if rel_folder and rel_folder != '.':
+        target_dir = (out_dir / rel_folder).resolve()
+        if str(target_dir).startswith(str(out_dir)) and target_dir.exists():
+            out_dir = target_dir
+
     try:
-        subprocess.Popen(['xdg-open', out_dir])
-        return jsonify({"message": f"Opened output folder: {out_dir}"})
+        if os.name == 'nt':
+            os.startfile(str(out_dir))
+        elif sys.platform == 'darwin':
+            subprocess.Popen(['open', str(out_dir)])
+        else:
+            subprocess.Popen(['xdg-open', str(out_dir)])
+        return jsonify({"message": f"Opened folder: {out_dir}"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# =========================================================================
+# Deep PDF Content Search & Caching Engine
+# =========================================================================
+pdf_search_cache = {}
+
+def get_pdf_page_texts(file_path):
+    try:
+        mtime = os.path.getmtime(file_path)
+        cached = pdf_search_cache.get(file_path)
+        if cached and cached.get('mtime') == mtime:
+            return cached.get('pages', [])
+        
+        reader = PdfReader(file_path)
+        pages_data = []
+        for idx, page in enumerate(reader.pages):
+            text = page.extract_text() or ''
+            clean_text = ' '.join(text.split())
+            pages_data.append((idx + 1, clean_text))
+        
+        pdf_search_cache[file_path] = {'mtime': mtime, 'pages': pages_data}
+        return pages_data
+    except Exception as e:
+        print(f"Error reading PDF {file_path}: {e}")
+        return []
+
+@app.route('/api/output/search', methods=['GET'])
+def search_output_content():
+    query = request.args.get('q', '').strip()
+    if not query:
+        return jsonify({"query": "", "results": [], "total_matching_files": 0, "total_matches": 0})
+    
+    q_lower = query.lower()
+    out_base = Path(app.config['OUTPUT_FOLDER']).resolve()
+    if not out_base.exists():
+        return jsonify({"query": query, "results": [], "total_matching_files": 0, "total_matches": 0})
+    
+    results = []
+    total_matches = 0
+    
+    for root, dirs, files in os.walk(out_base):
+        for file_name in files:
+            if not file_name.lower().endswith('.pdf'):
+                continue
+            
+            full_path = os.path.join(root, file_name)
+            rel_file = os.path.relpath(full_path, out_base).replace('\\', '/')
+            rel_folder = os.path.dirname(rel_file) or '.'
+            folder_display = os.path.basename(root) if rel_folder != '.' else 'Root Directory'
+            
+            name_matches = (q_lower in file_name.lower()) or (q_lower in folder_display.lower())
+            pages_data = get_pdf_page_texts(full_path)
+            matched_snippets = []
+            
+            for page_num, page_text in pages_data:
+                page_text_lower = page_text.lower()
+                pos = 0
+                while True:
+                    idx = page_text_lower.find(q_lower, pos)
+                    if idx == -1:
+                        break
+                    
+                    start = max(0, idx - 40)
+                    end = min(len(page_text), idx + len(query) + 40)
+                    snippet = ("..." if start > 0 else "") + page_text[start:end].strip() + ("..." if end < len(page_text) else "")
+                    
+                    matched_snippets.append({
+                        "page": page_num,
+                        "snippet": snippet
+                    })
+                    
+                    pos = idx + len(q_lower)
+                    if len(matched_snippets) >= 8:
+                        break
+                if len(matched_snippets) >= 8:
+                    break
+            
+            if matched_snippets or name_matches:
+                size_bytes = os.path.getsize(full_path)
+                match_count = len(matched_snippets)
+                total_matches += match_count
+                results.append({
+                    "file_name": file_name,
+                    "rel_path": rel_file,
+                    "folder_name": folder_display,
+                    "folder_rel_path": rel_folder,
+                    "size_formatted": format_size(size_bytes),
+                    "page_count": len(pages_data),
+                    "match_count": match_count,
+                    "name_match": name_matches,
+                    "snippets": matched_snippets
+                })
+    
+    results.sort(key=lambda x: (x['match_count'] > 0, x['match_count']), reverse=True)
+    
+    return jsonify({
+        "query": query,
+        "total_matching_files": len(results),
+        "total_matches": total_matches,
+        "results": results
+    })
+
+@app.route('/api/output/doc-info', methods=['GET'])
+def get_output_doc_info():
+    rel_path = request.args.get('path', '').strip()
+    if not rel_path:
+        return jsonify({"error": "No path provided"}), 400
+    
+    out_base = Path(app.config['OUTPUT_FOLDER']).resolve()
+    target_path = (out_base / rel_path).resolve()
+    
+    if not str(target_path).startswith(str(out_base)):
+        return jsonify({"error": "Access denied"}), 403
+    
+    if not target_path.exists() or not target_path.is_file():
+        return jsonify({"error": "File not found"}), 404
+    
+    pages_data = get_pdf_page_texts(str(target_path))
+    size_bytes = os.path.getsize(str(target_path))
+    
+    return jsonify({
+        "file_name": target_path.name,
+        "rel_path": rel_path,
+        "size_formatted": format_size(size_bytes),
+        "page_count": len(pages_data),
+        "pages": [{"page": p[0], "text": p[1]} for p in pages_data]
+    })
 
 if __name__ == '__main__':
     print("Starting PCIC Form Generator Web Server on http://localhost:5000")

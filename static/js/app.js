@@ -52,7 +52,78 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Mode State: 'generator' or 'viewer'
+    let currentAppMode = 'generator';
+
+    function setAppMode(mode) {
+        currentAppMode = mode;
+        const generatorView = document.getElementById('form-generator-view');
+        const wizardNav = document.getElementById('wizard-nav-container');
+        const viewerView = document.getElementById('pdf-viewer-view');
+        const viewerNav = document.getElementById('viewer-mode-nav');
+        const modeIcon = document.getElementById('app-mode-icon');
+        const modeIconI = document.getElementById('mode-icon-i');
+        const brandTitle = document.getElementById('app-brand-title');
+        const brandSubtitle = document.getElementById('app-brand-subtitle');
+        const headerModeLabel = document.getElementById('btn-header-mode-label');
+        const headerModeIcon = document.querySelector('#btn-header-mode-toggle i');
+
+        if (mode === 'viewer') {
+            if (generatorView) generatorView.style.display = 'none';
+            if (wizardNav) wizardNav.style.display = 'none';
+            if (viewerView) viewerView.style.display = 'block';
+            if (viewerNav) viewerNav.style.display = 'flex';
+
+            const explorerStage = document.getElementById('output-explorer-stage');
+            const viewerStage = document.getElementById('output-viewer-stage');
+            if (explorerStage) explorerStage.style.display = 'block';
+            if (viewerStage) viewerStage.style.display = 'none';
+
+            if (modeIcon) modeIcon.classList.add('viewer-mode-active');
+            if (modeIconI) modeIconI.className = 'fa-solid fa-book-open-reader';
+            if (brandTitle) brandTitle.textContent = 'PCIC PDF Viewer';
+            if (brandSubtitle) brandSubtitle.textContent = 'Output Bundle Explorer & Interactive Reader';
+            if (headerModeLabel) headerModeLabel.textContent = 'Form Studio Mode';
+            if (headerModeIcon) headerModeIcon.className = 'fa-solid fa-wand-magic-sparkles';
+
+            loadOutputTree(false);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            showToast("Switched to Output Directory & PDF Library", "info");
+        } else {
+            if (generatorView) generatorView.style.display = 'block';
+            if (wizardNav) wizardNav.style.display = 'flex';
+            if (viewerView) viewerView.style.display = 'none';
+            if (viewerNav) viewerNav.style.display = 'none';
+
+            if (modeIcon) modeIcon.classList.remove('viewer-mode-active');
+            if (modeIconI) modeIconI.className = 'fa-solid fa-file-pdf';
+            if (brandTitle) brandTitle.textContent = 'PCIC Form Studio';
+            if (brandSubtitle) brandSubtitle.textContent = 'Dynamic Batch PDF & Transmittal Engine';
+            if (headerModeLabel) headerModeLabel.textContent = 'PDF Viewer Mode';
+            if (headerModeIcon) headerModeIcon.className = 'fa-solid fa-layer-group';
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            showToast("Returned to Form Studio", "info");
+        }
+    }
+
     function setupEventListeners() {
+        // App Mode Switchers (Brand Icon / Header Toggle Button / Batch Jump)
+        const brandToggle = document.getElementById('brand-mode-toggle');
+        const appModeIcon = document.getElementById('app-mode-icon');
+        const btnHeaderToggle = document.getElementById('btn-header-mode-toggle');
+        const btnJumpViewer = document.getElementById('btn-jump-to-viewer-mode');
+
+        const toggleMode = () => setAppMode(currentAppMode === 'generator' ? 'viewer' : 'generator');
+
+        if (appModeIcon) appModeIcon.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleMode();
+        });
+        if (brandToggle) brandToggle.addEventListener('click', toggleMode);
+        if (btnHeaderToggle) btnHeaderToggle.addEventListener('click', toggleMode);
+        if (btnJumpViewer) btnJumpViewer.addEventListener('click', () => setAppMode('viewer'));
+
         // Wizard navigation
         document.querySelectorAll('.step-item').forEach(item => {
             item.addEventListener('click', () => {
@@ -106,8 +177,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const handleRestart = () => {
             const btnRestart = document.getElementById('btn-restart-process');
             const btnFooterRestart = document.getElementById('btn-footer-restart-process');
+            const btnJump = document.getElementById('btn-jump-to-viewer-mode');
             if (btnRestart) btnRestart.style.display = 'none';
             if (btnFooterRestart) btnFooterRestart.style.display = 'none';
+            if (btnJump) btnJump.style.display = 'none';
 
             setStep(1);
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -149,6 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const row = document.createElement('div');
                 let rawVal = mapping[tag] || '';
                 let isCustom = false;
+                let isUnderline = false;
                 let customVal = '';
                 let selectedHeader = rawVal;
 
@@ -156,6 +230,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     isCustom = true;
                     customVal = rawVal.substring(7);
                     selectedHeader = '__CUSTOM__';
+                } else if (rawVal === '__BLANK_UNDERLINE__' || rawVal === 'UNDERLINE:') {
+                    isUnderline = true;
+                    selectedHeader = '__BLANK_UNDERLINE__';
                 }
 
                 const isMatched = Boolean(rawVal);
@@ -164,11 +241,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 row.setAttribute('data-tag', tag);
 
                 let selectOptions = `<option value="">-- Ignore / Unmapped --</option>`;
+                selectOptions += `<option value="__BLANK_UNDERLINE__" ${isUnderline ? 'selected' : ''}>Blank (Underline)</option>`;
                 selectOptions += `<option value="__CUSTOM__" ${isCustom ? 'selected' : ''}>✍️ Custom Static Text...</option>`;
                 if (headers.length > 0) {
                     selectOptions += `<optgroup label="Excel Headers">`;
                     headers.forEach(h => {
-                        const sel = (!isCustom && h === selectedHeader) ? 'selected' : '';
+                        const sel = (!isCustom && !isUnderline && h === selectedHeader) ? 'selected' : '';
                         selectOptions += `<option value="${h}" ${sel}>${h}</option>`;
                     });
                     selectOptions += `</optgroup>`;
@@ -206,6 +284,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (selectEl.value === '__CUSTOM__') {
                         inputEl.style.display = 'inline-block';
                         inputEl.focus();
+                        row.className = 'mapping-row-item matched';
+                    } else if (selectEl.value === '__BLANK_UNDERLINE__') {
+                        inputEl.style.display = 'none';
+                        inputEl.value = '';
                         row.className = 'mapping-row-item matched';
                     } else if (selectEl.value) {
                         inputEl.style.display = 'none';
@@ -268,18 +350,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const listEl = container.querySelector('#trans-columns-list');
 
-            function reindexAndSave() {
-                let currentPos = 1;
-                listEl.querySelectorAll('.trans-col-item').forEach(el => {
-                    const chk = el.querySelector('.trans-col-checkbox');
-                    const inp = el.querySelector('.col-order-input');
-                    if (chk.checked) {
-                        inp.value = currentPos++;
-                    }
-                });
-                saveTransmittalColumns();
-            }
-
             columns.forEach(col => {
                 const item = document.createElement('div');
                 item.className = `trans-col-item ${col.enabled ? 'selected' : 'disabled'}`;
@@ -294,8 +364,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="order-label">Col Position:</span>
                         <input type="number" min="1" max="99" class="col-order-input" value="${col.order || ''}" placeholder="#" />
                         <div class="col-order-nav">
-                            <button type="button" class="btn-order-move btn-order-up" title="Move Up"><i class="fa-solid fa-circle-arrow-up"></i></button>
-                            <button type="button" class="btn-order-move btn-order-down" title="Move Down"><i class="fa-solid fa-circle-arrow-down"></i></button>
+                            <button type="button" class="btn-order-move btn-order-up" title="Increase Col Position (+1)"><i class="fa-solid fa-circle-arrow-up"></i></button>
+                            <button type="button" class="btn-order-move btn-order-down" title="Decrease Col Position (-1)"><i class="fa-solid fa-circle-arrow-down"></i></button>
                         </div>
                     </div>
                 `;
@@ -308,21 +378,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 btnUp.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    const prev = item.previousElementSibling;
-                    if (prev) {
-                        listEl.insertBefore(item, prev);
-                        reindexAndSave();
+                    let currentVal = parseInt(ordInput.value, 10);
+                    if (isNaN(currentVal)) currentVal = 0;
+                    ordInput.value = currentVal + 1;
+                    if (!chk.checked) {
+                        chk.checked = true;
+                        item.className = 'trans-col-item selected';
                     }
+                    saveTransmittalColumns();
                 });
 
                 btnDown.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    const next = item.nextElementSibling;
-                    if (next) {
-                        listEl.insertBefore(next, item);
-                        reindexAndSave();
+                    let currentVal = parseInt(ordInput.value, 10);
+                    if (isNaN(currentVal) || currentVal <= 1) {
+                        ordInput.value = 1;
+                    } else {
+                        ordInput.value = currentVal - 1;
                     }
+                    saveTransmittalColumns();
                 });
 
                 chk.addEventListener('change', () => {
@@ -513,12 +588,31 @@ document.addEventListener('DOMContentLoaded', () => {
         if (overlay) overlay.classList.add('active');
         if (btnRefreshIcon) btnRefreshIcon.classList.add('fa-spin');
 
-        iframe.onload = () => {
+        const sampleUrl = `/api/template/pdf-preview?type=${type}&t=${Date.now()}`;
+        const targetViewerSrc = `/static/pdfjs/web/viewer.html?file=${encodeURIComponent(sampleUrl)}#zoom=page-width`;
+
+        const hideLoading = () => {
             if (overlay) overlay.classList.remove('active');
             if (btnRefreshIcon) btnRefreshIcon.classList.remove('fa-spin');
         };
 
-        iframe.src = `/api/template/pdf-preview?type=${type}&t=${Date.now()}`;
+        // If iframe is already initialized with PDF.js, hot-swap document in-memory without full reload
+        try {
+            if (iframe && iframe.contentWindow && iframe.contentWindow.PDFViewerApplication && iframe.contentWindow.PDFViewerApplication.open) {
+                iframe.contentWindow.PDFViewerApplication.open({ url: sampleUrl }).then(() => {
+                    hideLoading();
+                }).catch(() => {
+                    iframe.src = targetViewerSrc;
+                });
+                return;
+            }
+        } catch (e) {}
+
+        iframe.onload = () => {
+            hideLoading();
+        };
+
+        iframe.src = targetViewerSrc;
     }
 
     function setupDropZone(dropId, inputId, fileType) {
@@ -702,9 +796,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 appendLog('success', `Finished! Merged ${data.summary.total_merged} PDFs into output folder.`);
                 showToast(`Batch completed successfully!`, 'success');
                 
-                // Show restart buttons
+                // Show restart and jump buttons
                 if (btnRestart) btnRestart.style.display = 'inline-flex';
                 if (btnFooterRestart) btnFooterRestart.style.display = 'inline-flex';
+                const btnJump = document.getElementById('btn-jump-to-viewer-mode');
+                if (btnJump) btnJump.style.display = 'inline-flex';
 
                 eventSource.close();
             } else if (data.type === 'error') {
@@ -732,12 +828,521 @@ document.addEventListener('DOMContentLoaded', () => {
         logContainer.scrollTop = logContainer.scrollHeight;
     }
 
-    function openOutputFolder() {
-        fetch('/api/output/open', { method: 'POST' })
+    function openOutputFolder(folderRelPath = '') {
+        fetch('/api/output/open', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder: folderRelPath || '' })
+        })
         .then(res => res.json())
         .then(data => {
             if (data.error) showToast(data.error, 'error');
             else showToast(data.message, 'success');
+        })
+        .catch(err => showToast(`Failed to open folder: ${err}`, 'error'));
+    }
+
+    // =========================================================================
+    // Output Folder Tree Explorer & PDF Viewer Engine
+    // =========================================================================
+    let currentOutputTree = null;
+    let activeSelectedPdfRelPath = null;
+
+    let searchDebounceTimer = null;
+
+    function initOutputExplorer() {
+        const btnRefresh = document.getElementById('btn-refresh-output-tree');
+        const btnOpenFolder = document.getElementById('btn-open-explorer-folder');
+        const searchInput = document.getElementById('input-search-output');
+        const btnClearSearch = document.getElementById('btn-clear-search');
+
+        if (btnRefresh) {
+            btnRefresh.addEventListener('click', () => {
+                showToast("Scanning output folder...", "info");
+                loadOutputTree();
+            });
+        }
+
+        if (btnOpenFolder) {
+            btnOpenFolder.addEventListener('click', () => openOutputFolder());
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener('input', () => {
+                const q = searchInput.value.trim();
+                if (btnClearSearch) btnClearSearch.style.display = q ? 'block' : 'none';
+                
+                clearTimeout(searchDebounceTimer);
+                if (!q) {
+                    if (currentOutputTree && currentOutputTree.folders) {
+                        const badge = document.getElementById('output-total-badge');
+                        if (badge) badge.textContent = `${currentOutputTree.total_files} Files (${currentOutputTree.total_size_formatted})`;
+                        renderOutputTree(currentOutputTree.folders, '');
+                    }
+                } else {
+                    searchDebounceTimer = setTimeout(() => {
+                        performDeepPdfSearch(q);
+                    }, 280);
+                }
+            });
+        }
+
+        if (btnClearSearch) {
+            btnClearSearch.addEventListener('click', () => {
+                if (searchInput) searchInput.value = '';
+                btnClearSearch.style.display = 'none';
+                if (currentOutputTree && currentOutputTree.folders) {
+                    const badge = document.getElementById('output-total-badge');
+                    if (badge) badge.textContent = `${currentOutputTree.total_files} Files (${currentOutputTree.total_size_formatted})`;
+                    renderOutputTree(currentOutputTree.folders, '');
+                }
+            });
+        }
+    }
+
+    initOutputExplorer();
+
+    function performDeepPdfSearch(query) {
+        const container = document.getElementById('output-tree-container');
+        const badge = document.getElementById('output-total-badge');
+        if (badge) badge.textContent = `Searching inside PDFs...`;
+
+        fetch(`/api/output/search?q=${encodeURIComponent(query)}`)
+        .then(res => res.json())
+        .then(data => {
+            if (badge) {
+                badge.textContent = `${data.total_matching_files} Bundles (${data.total_matches} text matches)`;
+            }
+            renderSearchResults(data, query);
+        })
+        .catch(err => {
+            if (container) {
+                container.innerHTML = `<div class="empty-tree-state"><i class="fa-solid fa-triangle-exclamation" style="color:var(--accent-red);"></i><p>Search error: ${err}</p></div>`;
+            }
+        });
+    }
+
+    function renderSearchResults(data, query) {
+        const container = document.getElementById('output-tree-container');
+        if (!container) return;
+
+        const results = data.results || [];
+        if (results.length === 0) {
+            container.innerHTML = `
+                <div class="empty-tree-state">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <p>No PDF files or farmer details matched "<strong>${query}</strong>".<br>Try searching for a different Farmer Name, ID, or Location.</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Group search results by folder
+        const grouped = {};
+        results.forEach(res => {
+            const folder = res.folder_name;
+            if (!grouped[folder]) {
+                grouped[folder] = {
+                    name: folder,
+                    rel_path: res.folder_rel_path,
+                    files: []
+                };
+            }
+            grouped[folder].files.push(res);
+        });
+
+        container.innerHTML = '';
+        const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+
+        Object.values(grouped).forEach(folder => {
+            const card = document.createElement('div');
+            card.className = 'folder-group-card';
+
+            const header = document.createElement('div');
+            header.className = 'folder-header';
+            header.innerHTML = `
+                <div class="folder-title-left">
+                    <i class="fa-solid fa-folder folder-icon"></i>
+                    <span>${folder.name}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:0.5rem;">
+                    <span class="folder-file-badge">${folder.files.length} Bundles</span>
+                    <i class="fa-solid fa-chevron-down folder-toggle-arrow"></i>
+                </div>
+            `;
+
+            const fileList = document.createElement('div');
+            fileList.className = 'folder-file-list';
+
+            folder.files.forEach(file => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'pdf-file-wrapper';
+
+                const item = document.createElement('div');
+                const isSelected = (file.rel_path === activeSelectedPdfRelPath);
+                item.className = `pdf-file-item ${isSelected ? 'active' : ''}`;
+                item.setAttribute('data-rel-path', file.rel_path);
+
+                const matchBadge = file.match_count > 0 
+                    ? `<span class="search-match-badge"><i class="fa-solid fa-bullseye"></i> ${file.match_count} match${file.match_count > 1 ? 'es' : ''}</span>`
+                    : `<span class="search-match-badge" style="background:rgba(59,130,246,0.2); color:#60a5fa;">Name match</span>`;
+
+                item.innerHTML = `
+                    <div class="pdf-file-left">
+                        <i class="fa-solid fa-file-pdf"></i>
+                        <span>${file.file_name}</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:0.4rem;">
+                        ${matchBadge}
+                        <span class="pdf-file-size">${file.size_formatted}</span>
+                    </div>
+                `;
+
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const firstPage = (file.snippets && file.snippets.length > 0) ? file.snippets[0].page : 1;
+                    viewPdfFile(file.rel_path, file.file_name, file.size_formatted, folder.name, folder.rel_path, firstPage);
+                });
+
+                wrapper.appendChild(item);
+
+                // Render Snippets if any
+                if (file.snippets && file.snippets.length > 0) {
+                    const snippetsBox = document.createElement('div');
+                    snippetsBox.className = 'search-snippets-box';
+
+                    file.snippets.forEach(s => {
+                        const pill = document.createElement('div');
+                        pill.className = 'search-snippet-pill';
+                        
+                        const highlightedSnippet = s.snippet.replace(regex, '<mark>$1</mark>');
+                        pill.innerHTML = `<strong>Page ${s.page}:</strong> "${highlightedSnippet}"`;
+
+                        pill.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            viewPdfFile(file.rel_path, file.file_name, file.size_formatted, folder.name, folder.rel_path, s.page);
+                        });
+
+                        snippetsBox.appendChild(pill);
+                    });
+
+                    wrapper.appendChild(snippetsBox);
+                }
+
+                fileList.appendChild(wrapper);
+            });
+
+            header.addEventListener('click', () => {
+                card.classList.toggle('collapsed');
+            });
+
+            card.appendChild(header);
+            card.appendChild(fileList);
+            container.appendChild(card);
+        });
+    }
+
+    function loadOutputTree(autoSelectFirst = false) {
+        const container = document.getElementById('output-tree-container');
+        const badge = document.getElementById('output-total-badge');
+        const searchInput = document.getElementById('input-search-output');
+        const searchTerm = searchInput ? searchInput.value.trim() : '';
+
+        if (searchTerm) {
+            performDeepPdfSearch(searchTerm);
+            return;
+        }
+
+        fetch('/api/output/tree')
+        .then(res => res.json())
+        .then(data => {
+            currentOutputTree = data;
+            if (badge) {
+                badge.textContent = `${data.total_files} Files (${data.total_size_formatted})`;
+            }
+
+            renderOutputTree(data.folders || [], '');
+
+            if (autoSelectFirst && data.folders && data.folders.length > 0) {
+                for (const folder of data.folders) {
+                    if (folder.files && folder.files.length > 0) {
+                        const firstFile = folder.files[0];
+                        viewPdfFile(firstFile.rel_path, firstFile.name, firstFile.size_formatted, folder.name, folder.rel_path, 1);
+                        break;
+                    }
+                }
+            }
+        })
+        .catch(err => {
+            if (container) {
+                container.innerHTML = `<div class="empty-tree-state"><i class="fa-solid fa-triangle-exclamation" style="color:var(--accent-red);"></i><p>Failed to load output files: ${err}</p></div>`;
+            }
+        });
+    }
+
+    function renderOutputTree(folders, searchTerm = '') {
+        const container = document.getElementById('output-tree-container');
+        if (!container) return;
+
+        if (!folders || folders.length === 0) {
+            container.innerHTML = `
+                <div class="empty-tree-state">
+                    <i class="fa-regular fa-folder-open"></i>
+                    <p>No generated PDF files found in <code>output/</code> yet.<br>Execute batch processing in Form Generator to create PDF bundles.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const q = searchTerm.toLowerCase();
+        let matchedTotal = 0;
+        container.innerHTML = '';
+
+        folders.forEach(folder => {
+            const folderMatches = folder.name.toLowerCase().includes(q);
+            const matchingFiles = folder.files.filter(f => folderMatches || f.name.toLowerCase().includes(q));
+
+            if (matchingFiles.length === 0) return;
+            matchedTotal += matchingFiles.length;
+
+            const card = document.createElement('div');
+            card.className = 'folder-group-card';
+
+            const header = document.createElement('div');
+            header.className = 'folder-header';
+            header.innerHTML = `
+                <div class="folder-title-left">
+                    <i class="fa-solid fa-folder folder-icon"></i>
+                    <span>${folder.name}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:0.5rem;">
+                    <span class="folder-file-badge">${matchingFiles.length} Bundles</span>
+                    <i class="fa-solid fa-chevron-down folder-toggle-arrow"></i>
+                </div>
+            `;
+
+            const fileList = document.createElement('div');
+            fileList.className = 'folder-file-list';
+
+            matchingFiles.forEach(file => {
+                const item = document.createElement('div');
+                const isSelected = (file.rel_path === activeSelectedPdfRelPath);
+                item.className = `pdf-file-item ${isSelected ? 'active' : ''}`;
+                item.setAttribute('data-rel-path', file.rel_path);
+
+                item.innerHTML = `
+                    <div class="pdf-file-left">
+                        <i class="fa-solid fa-file-pdf"></i>
+                        <span>${file.name}</span>
+                    </div>
+                    <span class="pdf-file-size">${file.size_formatted}</span>
+                `;
+
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    viewPdfFile(file.rel_path, file.name, file.size_formatted, folder.name, folder.rel_path, 1);
+                });
+
+                fileList.appendChild(item);
+            });
+
+            header.addEventListener('click', () => {
+                card.classList.toggle('collapsed');
+            });
+
+            card.appendChild(header);
+            card.appendChild(fileList);
+            container.appendChild(card);
+        });
+
+        if (matchedTotal === 0 && q) {
+            container.innerHTML = `
+                <div class="empty-tree-state">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <p>No PDF files matched "<strong>${searchTerm}</strong>".<br>Try searching for a different Barangay or Municipality name.</p>
+                </div>
+            `;
+        }
+    }
+
+    // =========================================================================
+    // In-Document Page Navigation & Viewer Logic
+    // =========================================================================
+    let currentDocRelPath = null;
+    let currentDocFileName = '';
+    let currentDocFileSize = '';
+    let currentDocFolderName = '';
+    let currentDocFolderRelPath = '';
+
+    function jumpToDocPage(pageNum) {
+        const metaEl = document.getElementById('viewer-file-meta');
+        const iframe = document.getElementById('output-pdf-frame');
+
+        if (metaEl) {
+            metaEl.textContent = `Folder: ${currentDocFolderName} | Size: ${currentDocFileSize} (Page ${pageNum})`;
+        }
+
+        if (iframe && currentDocRelPath) {
+            try {
+                if (iframe.contentWindow && iframe.contentWindow.PDFViewerApplication && iframe.contentWindow.PDFViewerApplication.page !== undefined) {
+                    iframe.contentWindow.PDFViewerApplication.page = pageNum;
+                    return;
+                }
+            } catch (e) {
+                // Fallback to URL navigation if direct property access fails
+            }
+            const fileUrl = `/api/output/view-file?path=${encodeURIComponent(currentDocRelPath)}`;
+            iframe.src = `/static/pdfjs/web/viewer.html?file=${encodeURIComponent(fileUrl)}#page=${pageNum}&zoom=page-width`;
+        }
+    }
+
+    function viewPdfFile(relPath, fileName, fileSize, folderName, folderRelPath, page = 1) {
+        activeSelectedPdfRelPath = relPath;
+        currentDocRelPath = relPath;
+        currentDocFileName = fileName;
+        currentDocFileSize = fileSize;
+        currentDocFolderName = folderName;
+        currentDocFolderRelPath = folderRelPath;
+
+        const explorerStage = document.getElementById('output-explorer-stage');
+        const viewerStage = document.getElementById('output-viewer-stage');
+        if (explorerStage) explorerStage.style.display = 'none';
+        if (viewerStage) viewerStage.style.display = 'flex';
+
+        const nameEl = document.getElementById('viewer-file-name');
+        const metaEl = document.getElementById('viewer-file-meta');
+        const actionsEl = document.getElementById('viewer-actions');
+        const btnDownload = document.getElementById('btn-download-pdf');
+        const btnOpenFolder = document.getElementById('btn-open-file-folder');
+        const btnToggleFind = document.getElementById('btn-toggle-pdf-find');
+        const iframe = document.getElementById('output-pdf-frame');
+
+        if (nameEl) nameEl.textContent = fileName;
+        if (metaEl) metaEl.textContent = `Folder: ${folderName} | Size: ${fileSize}`;
+        if (actionsEl) actionsEl.style.display = 'flex';
+
+        if (btnDownload) {
+            btnDownload.href = `/api/output/download-file?path=${encodeURIComponent(relPath)}`;
+            btnDownload.download = fileName;
+        }
+
+        if (btnOpenFolder) {
+            btnOpenFolder.onclick = (e) => {
+                e.preventDefault();
+                openOutputFolder(folderRelPath);
+            };
+        }
+
+        const btnSavePdf = document.getElementById('btn-save-pdf-changes');
+        if (btnSavePdf) {
+            btnSavePdf.onclick = (e) => {
+                e.preventDefault();
+                savePdfChanges();
+            };
+        }
+
+        if (btnToggleFind) {
+            btnToggleFind.onclick = (e) => {
+                e.preventDefault();
+                if (iframe && iframe.contentWindow && iframe.contentWindow.PDFViewerApplication) {
+                    const findBar = iframe.contentWindow.PDFViewerApplication.findBar;
+                    if (findBar) {
+                        if (findBar.opened) {
+                            findBar.close();
+                        } else {
+                            findBar.open();
+                        }
+                    }
+                }
+            };
+        }
+
+        if (iframe) {
+            iframe.style.display = 'block';
+            const fileUrl = `/api/output/view-file?path=${encodeURIComponent(relPath)}`;
+            const pageNum = (page && page > 1) ? page : 1;
+            iframe.src = `/static/pdfjs/web/viewer.html?file=${encodeURIComponent(fileUrl)}#page=${pageNum}&zoom=page-width`;
+        }
+
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    async function savePdfChanges() {
+        const btnSave = document.getElementById('btn-save-pdf-changes');
+        const iframe = document.getElementById('output-pdf-frame');
+        const metaEl = document.getElementById('viewer-file-meta');
+
+        if (!currentDocRelPath) {
+            showToast("No active PDF selected to save.", "warning");
+            return;
+        }
+
+        if (!iframe || !iframe.contentWindow || !iframe.contentWindow.PDFViewerApplication || !iframe.contentWindow.PDFViewerApplication.pdfDocument) {
+            showToast("PDF document is not yet ready or loaded.", "warning");
+            return;
+        }
+
+        const originalHtml = btnSave ? btnSave.innerHTML : '';
+        if (btnSave) {
+            btnSave.disabled = true;
+            btnSave.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+        }
+
+        try {
+            const pdfDoc = iframe.contentWindow.PDFViewerApplication.pdfDocument;
+            const pdfBytes = await pdfDoc.saveDocument();
+            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+
+            const formData = new FormData();
+            formData.append('path', currentDocRelPath);
+            formData.append('file', blob, currentDocFileName);
+
+            const res = await fetch('/api/output/save-pdf', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || 'Failed to save PDF');
+            }
+
+            if (data.size_formatted) {
+                currentDocFileSize = data.size_formatted;
+                if (metaEl) {
+                    metaEl.textContent = `Folder: ${currentDocFolderName} | Size: ${currentDocFileSize}`;
+                }
+            }
+
+            showToast(data.message || `Saved changes directly to ${currentDocFileName}!`, "success");
+
+            if (btnSave) {
+                btnSave.innerHTML = '<i class="fa-solid fa-check"></i> Saved!';
+                setTimeout(() => {
+                    btnSave.innerHTML = originalHtml;
+                    btnSave.disabled = false;
+                }, 2000);
+            }
+        } catch (err) {
+            console.error("Error saving PDF changes:", err);
+            showToast(`Error saving PDF: ${err.message}`, "error");
+            if (btnSave) {
+                btnSave.innerHTML = originalHtml;
+                btnSave.disabled = false;
+            }
+        }
+    }
+
+    const btnBackToDir = document.getElementById('btn-back-to-directory');
+    if (btnBackToDir) {
+        btnBackToDir.addEventListener('click', () => {
+            const explorerStage = document.getElementById('output-explorer-stage');
+            const viewerStage = document.getElementById('output-viewer-stage');
+            const iframe = document.getElementById('output-pdf-frame');
+            if (viewerStage) viewerStage.style.display = 'none';
+            if (explorerStage) explorerStage.style.display = 'block';
+            if (iframe) iframe.src = 'about:blank';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         });
     }
 });
