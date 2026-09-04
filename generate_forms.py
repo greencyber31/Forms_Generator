@@ -62,6 +62,42 @@ def _build_context(row_dict: dict) -> dict:
     return context
 
 
+def _get_row_sort_name(row_dict: dict) -> str:
+    """Extracts the normalized farmer name from a row dictionary for alphabetical sorting."""
+    lower_to_orig = {str(k).strip().lower().replace(' ', '_').replace('.', '').replace('-', '_'): k for k in row_dict.keys()}
+
+    last_key = None
+    first_key = None
+    for l_cand in ['last_name', 'lastname', 'surname', 'family_name', 'lname']:
+        if l_cand in lower_to_orig:
+            last_key = lower_to_orig[l_cand]
+            break
+    for f_cand in ['first_name', 'firstname', 'given_name', 'fname']:
+        if f_cand in lower_to_orig:
+            first_key = lower_to_orig[f_cand]
+            break
+
+    if last_key:
+        l_val = str(row_dict.get(last_key, '')).strip().upper()
+        f_val = str(row_dict.get(first_key, '')).strip().upper() if first_key else ""
+        if l_val and l_val not in {'NAN', 'NONE', 'NULL'}:
+            return f"{l_val}, {f_val}".strip()
+
+    for n_cand in ['full_name', 'fullname', 'farmer_name', 'farmername', 'farmers_name', 'farmersname', 'beneficiary_name', 'beneficiary', 'name']:
+        if n_cand in lower_to_orig:
+            val = str(row_dict.get(lower_to_orig[n_cand], '')).strip().upper()
+            if val and val not in {'NAN', 'NONE', 'NULL'}:
+                return val
+
+    for clean_k, orig_k in lower_to_orig.items():
+        if 'name' in clean_k and not any(ex in clean_k for ex in ['group', 'lender', 'farm', 'program']):
+            val = str(row_dict.get(orig_k, '')).strip().upper()
+            if val and val not in {'NAN', 'NONE', 'NULL'}:
+                return val
+
+    return ""
+
+
 def _generate_one_pdf(args: tuple):
     """
     Worker function (runs in a separate process):
@@ -199,10 +235,25 @@ def _generate_one_pdf(args: tuple):
                 pythoncom.CoInitialize()
                 word = None
                 try:
-                    word = win32.DispatchEx("Word.Application")
+                    try:
+                        word = win32.DispatchEx("Word.Application")
+                    except Exception:
+                        try:
+                            import win32com
+                            gen_dir = getattr(win32com, '__gen_path__', None)
+                            if gen_dir and os.path.exists(gen_dir):
+                                shutil.rmtree(gen_dir, ignore_errors=True)
+                        except Exception:
+                            pass
+                        word = win32.DispatchEx("Word.Application")
+
                     word.Visible = False
                     word.DisplayAlerts = 0
-                    doc = word.Documents.Open(str(temp_docx_path.resolve()), ReadOnly=True)
+                    try:
+                        word.NormalTemplate.Saved = True
+                    except Exception:
+                        pass
+                    doc = word.Documents.Open(str(temp_docx_path.resolve()), ReadOnly=True, ConfirmConversions=False, AddToRecentFiles=False)
                     doc.SaveAs(str(temp_pdf_path.resolve()), FileFormat=17)
                     doc.Close(0)
                     if temp_pdf_path.exists():
@@ -210,7 +261,11 @@ def _generate_one_pdf(args: tuple):
                 finally:
                     if word:
                         try:
-                            word.Quit()
+                            word.NormalTemplate.Saved = True
+                        except Exception:
+                            pass
+                        try:
+                            word.Quit(0)
                         except Exception:
                             pass
                     pythoncom.CoUninitialize()
@@ -296,9 +351,11 @@ def main():
         if not province_name or not municipality_name or not barangay_name:
             continue  # skip fully-empty location entries
 
-        # Sort farmers alphabetically by Full Name
-        if 'Full Name' in group_df.columns:
-            group_df = group_df.sort_values(by='Full Name')
+        # Sort farmers strictly alphabetically by Full Name
+        group_df = group_df.copy()
+        group_df['_sort_key'] = group_df.apply(lambda r: _get_row_sort_name(r.to_dict()), axis=1)
+        group_df = group_df.sort_values(by='_sort_key', ascending=True, kind='mergesort')
+        group_df = group_df.drop(columns=['_sort_key'])
 
         # 1. Prepare Transmittal Data
         farmers_list = []
@@ -311,6 +368,8 @@ def main():
                 'Gender': ctx.get('Gender', ''),
                 'Reference_No': ctx.get('Reference_No', '')
             })
+
+        farmers_list.sort(key=lambda x: str(x.get('Full_Name', '')).strip().upper())
 
         # 2. Submit Transmittal Job
         transmittal_idx = len(jobs)

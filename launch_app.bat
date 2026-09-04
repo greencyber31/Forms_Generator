@@ -17,26 +17,46 @@ if exist "venv\Scripts\python.exe" (
     set "PYTHON_EXE=.venv\Scripts\python.exe"
 )
 
-:: 2. Check system Python / py launcher
+:: 2. Check py launcher (Python Launcher for Windows)
 if "%PYTHON_EXE%"=="" (
-    where python.exe >nul 2>nul
-    if %errorlevel% equ 0 (
-        python.exe -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" >nul 2>nul
-        if %errorlevel% equ 0 set "PYTHON_EXE=python.exe"
+    where py.exe >nul 2>nul
+    if not errorlevel 1 (
+        for /f "delims=" %%I in ('py -3 -c "import sys, os; print(os.path.abspath(sys.executable))" 2^>nul') do (
+            if exist "%%I" set "PYTHON_EXE=%%I"
+        )
     )
 )
 
-:: 3. Check AppData Python312
+:: 3. Check AppData standard Python installations
 if "%PYTHON_EXE%"=="" (
-    if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
+    if exist "%LOCALAPPDATA%\Programs\Python\Python313\python.exe" (
+        set "PYTHON_EXE=%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
+    ) else if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
         set "PYTHON_EXE=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+    ) else if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
+        set "PYTHON_EXE=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+    ) else if exist "%LOCALAPPDATA%\Programs\Python\Python310\python.exe" (
+        set "PYTHON_EXE=%LOCALAPPDATA%\Programs\Python\Python310\python.exe"
     )
 )
 
-:: 4. Check AppData Python311
+:: 4. Check ProgramFiles / system installations
 if "%PYTHON_EXE%"=="" (
-    if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
-        set "PYTHON_EXE=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+    if exist "%ProgramFiles%\Python313\python.exe" (
+        set "PYTHON_EXE=%ProgramFiles%\Python313\python.exe"
+    ) else if exist "%ProgramFiles%\Python312\python.exe" (
+        set "PYTHON_EXE=%ProgramFiles%\Python312\python.exe"
+    ) else if exist "%ProgramFiles%\Python311\python.exe" (
+        set "PYTHON_EXE=%ProgramFiles%\Python311\python.exe"
+    ) else if exist "%ProgramFiles%\Python310\python.exe" (
+        set "PYTHON_EXE=%ProgramFiles%\Python310\python.exe"
+    )
+)
+
+:: 5. Test system PATH python executable (verifying it is real and not Microsoft Store stub)
+if "%PYTHON_EXE%"=="" (
+    for /f "delims=" %%I in ('python -c "import sys, os; print(os.path.abspath(sys.executable))" 2^>nul') do (
+        if exist "%%I" set "PYTHON_EXE=%%I"
     )
 )
 
@@ -53,7 +73,7 @@ echo [INFO] Using Python: %PYTHON_EXE%
 :: Ensure requirements are installed
 echo [INFO] Verifying dependencies...
 "%PYTHON_EXE%" -c "import flask, pandas, openpyxl, docxtpl, docx, pypdf, win32com.client" >nul 2>nul
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo [INFO] Installing required dependencies...
     "%PYTHON_EXE%" -m pip install -r requirements.txt
 )

@@ -9,10 +9,13 @@ venv/
 env/
 ENV/
 
-# Output and temporary directories
-output/
+# Output and temporary directories (exclude inside contents of output)
+output/*
+!output/.gitkeep
+output_test/
 output_test_transmittal/
 temp_docs/
+temp_test_batch/
 temp_test_multi/
 uploads/*
 !uploads/.gitkeep
@@ -20,6 +23,9 @@ uploads/*
 *.pdf
 *.log
 scratch/
+
+# Excluded data folders
+CFTIF Database for Forms Generator/
 
 # IDEs and OS metadata
 .DS_Store

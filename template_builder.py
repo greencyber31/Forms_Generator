@@ -203,10 +203,25 @@ def render_docx_to_pdf_preview(docx_path: str, temp_dir: str, output_name: str) 
             pythoncom.CoInitialize()
             word = None
             try:
-                word = win32.DispatchEx("Word.Application")
+                try:
+                    word = win32.DispatchEx("Word.Application")
+                except Exception:
+                    try:
+                        import win32com
+                        gen_dir = getattr(win32com, '__gen_path__', None)
+                        if gen_dir and os.path.exists(gen_dir):
+                            shutil.rmtree(gen_dir, ignore_errors=True)
+                    except Exception:
+                        pass
+                    word = win32.DispatchEx("Word.Application")
+
                 word.Visible = False
                 word.DisplayAlerts = 0
-                doc = word.Documents.Open(docx_abs, ReadOnly=True)
+                try:
+                    word.NormalTemplate.Saved = True
+                except Exception:
+                    pass
+                doc = word.Documents.Open(docx_abs, ReadOnly=True, ConfirmConversions=False, AddToRecentFiles=False)
                 doc.SaveAs(pdf_abs, FileFormat=17)
                 doc.Close(0)
                 if os.path.exists(pdf_abs):
@@ -214,7 +229,11 @@ def render_docx_to_pdf_preview(docx_path: str, temp_dir: str, output_name: str) 
             finally:
                 if word:
                     try:
-                        word.Quit()
+                        word.NormalTemplate.Saved = True
+                    except Exception:
+                        pass
+                    try:
+                        word.Quit(0)
                     except Exception:
                         pass
                 pythoncom.CoUninitialize()
@@ -287,6 +306,7 @@ def render_sample_pdf_preview(
                             if r_k not in f_ctx:
                                 f_ctx[r_k] = r_v
                         farmers_list.append(f_ctx)
+                    farmers_list.sort(key=lambda x: str(x.get('Full_Name', x.get('Fullname', x.get('Name', '')))).strip().upper())
                 except Exception:
                     pass
 

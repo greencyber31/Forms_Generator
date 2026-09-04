@@ -788,6 +788,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 statCompleted.textContent = data.current;
                 statTotal.textContent = data.total;
                 statFailed.textContent = data.failed;
+                if (data.status_text && statusText) {
+                    statusText.textContent = data.status_text;
+                }
             } else if (data.type === 'complete') {
                 pulse.classList.remove('active');
                 statusText.textContent = "Batch Processing Complete!";
