@@ -572,25 +572,50 @@ def _convert_one_lo(args: tuple):
         return worker_idx, None, str(exc)
 
 
+def _compose_group_forms(args: tuple):
+    """
+    Combines individual farmer application forms for a single group into one consolidated multi-page DOCX.
+    Because all forms share the exact same A4 page setup and 3.05mm margins, each form remains strictly 1 page.
+    """
+    group_idx, form_paths, out_bundle_docx_str = args
+    if not form_paths:
+        return group_idx, None, "No forms in group"
+    try:
+        from docxcompose.composer import Composer
+        from docx import Document
+
+        master = Document(form_paths[0])
+        if len(form_paths) > 1:
+            composer = Composer(master)
+            for p in form_paths[1:]:
+                composer.append(Document(p))
+            composer.save(out_bundle_docx_str)
+        else:
+            master.save(out_bundle_docx_str)
+        return group_idx, Path(out_bundle_docx_str), None
+    except Exception as exc:
+        return group_idx, None, str(exc)
+
+
 def _convert_all_word_com(
-    docx_tasks: list[tuple[int, Path, Path]],
+    docx_tasks: list[tuple[any, Path, Path]],
     log_func,
     progress_callback=None,
     total_jobs: int = 1,
-    start_percent: int = 15,
+    start_percent: int = 35,
     end_percent: int = 85
 ):
     """
     High-performance, deadlock-free MS Word COM conversion:
-    Uses a single persistent background Word instance with dialog prompts disabled
-    and periodic recycling every 300 docs to prevent memory bloat.
+    Uses a single persistent background Word instance with screen updating,
+    pagination, and spelling checks disabled for maximum conversion throughput.
     """
     import win32com.client as win32
     import pythoncom
 
     pythoncom.CoInitialize()
     word = None
-    pdf_results: dict[int, Path] = {}
+    pdf_results: dict[any, Path] = {}
     error_count = 0
     done = 0
 
@@ -609,6 +634,14 @@ def _convert_all_word_com(
 
         w.Visible = False
         w.DisplayAlerts = 0
+        w.ScreenUpdating = False
+        try:
+            w.Options.Pagination = False
+            w.Options.CheckSpellingAsYouType = False
+            w.Options.CheckGrammarAsYouType = False
+            w.Options.SaveNormalPrompt = False
+        except Exception:
+            pass
         try:
             w.NormalTemplate.Saved = True
         except Exception:
@@ -617,8 +650,8 @@ def _convert_all_word_com(
 
     try:
         word = start_word()
-        for i, (worker_idx, docx_path, pdf_path) in enumerate(docx_tasks):
-            # Periodically recycle Word every 300 files to ensure completely clean COM state
+        for i, (task_id, docx_path, pdf_path) in enumerate(docx_tasks):
+            # Recycle Word every 300 conversions to ensure pristine memory state
             if i > 0 and i % 300 == 0:
                 try:
                     if word:
@@ -632,30 +665,29 @@ def _convert_all_word_com(
                 word = start_word()
 
             done += 1
-            if not docx_path or not docx_path.exists():
+            if not docx_path or not Path(docx_path).exists():
                 error_count += 1
-                log_func(f"Job [{done}/{total_jobs}] FAILED: Docx file was not created", "warning")
+                log_func(f"Conversion [{done}/{total_jobs}] FAILED: Docx file was not created", "warning")
                 continue
 
             try:
                 doc = word.Documents.Open(
-                    str(docx_path.resolve()),
+                    str(Path(docx_path).resolve()),
                     ReadOnly=True,
                     ConfirmConversions=False,
                     AddToRecentFiles=False
                 )
-                doc.SaveAs(str(pdf_path.resolve()), FileFormat=17)
+                doc.SaveAs(str(Path(pdf_path).resolve()), FileFormat=17)
                 doc.Close(0)
 
-                if pdf_path.exists() and pdf_path.stat().st_size > 0:
-                    pdf_results[worker_idx] = pdf_path
+                if Path(pdf_path).exists() and Path(pdf_path).stat().st_size > 0:
+                    pdf_results[task_id] = Path(pdf_path)
                 else:
                     error_count += 1
-                    log_func(f"Job [{done}/{total_jobs}] FAILED: PDF output not generated", "warning")
+                    log_func(f"Conversion [{done}/{total_jobs}] FAILED: PDF output not generated", "warning")
             except Exception as conv_err:
                 error_count += 1
-                log_func(f"Job [{done}/{total_jobs}] FAILED: {conv_err}", "warning")
-                # Recover Word in case of RPC error or crash
+                log_func(f"Conversion [{done}/{total_jobs}] FAILED: {conv_err}", "warning")
                 try:
                     if word:
                         word.Quit(0)
@@ -664,14 +696,14 @@ def _convert_all_word_com(
                 word = start_word()
 
             if progress_callback:
-                pct = start_percent + int((done / total_jobs) * (end_percent - start_percent))
+                pct = start_percent + int((done / max(total_jobs, 1)) * (end_percent - start_percent))
                 progress_callback({
                     "type": "progress",
-                    "current": done,
+                    "current": 0,
                     "total": total_jobs,
                     "percent": pct,
                     "failed": error_count,
-                    "status_text": f"Converting to PDF ({done}/{total_jobs})..."
+                    "status_text": f"Converting PDF bundles ({done}/{total_jobs})..."
                 })
 
     finally:
@@ -706,8 +738,12 @@ def run_batch_generation(
     progress_callback=None
 ):
     """
-    Executes full batch generation and returns execution summary.
-    Emits real-time SSE progress events if progress_callback is provided.
+    Executes high-speed consolidated batch generation.
+    Option 2 Pipeline:
+      1. Parallel .docx rendering of all farmer application forms and transmittals.
+      2. High-speed docx bundle consolidation per Barangay (forms share identical A4 margins).
+      3. Minimal PDF conversions (only 2 conversions per Barangay: Transmittal + Forms Bundle).
+      4. Instant PyPDF packaging of final output bundles.
     """
     out_path = Path(output_dir)
     tmp_path = Path(temp_dir)
@@ -730,7 +766,6 @@ def run_batch_generation(
         log(f"Test Mode: Limiting to first {test_limit} rows.")
         df = df.head(test_limit)
 
-    # Date column formatting
     for col in df.columns:
         if 'date' in str(col).lower() or 'birth' in str(col).lower():
             df[col] = pd.to_datetime(df[col], errors='coerce')
@@ -738,8 +773,6 @@ def run_batch_generation(
         df[col] = df[col].dt.strftime('%m/%d/%Y')
 
     df = df.fillna("")
-
-    # Resolve case-insensitive column matching
     col_dict = {str(c).strip().lower(): str(c) for c in df.columns}
 
     def resolve_col(user_choice, default_names):
@@ -763,16 +796,16 @@ def run_batch_generation(
         log(f"Grouping dataset by: {' > '.join(group_keys)}")
         grouped = df.groupby(group_keys, sort=True)
 
-    jobs: list[tuple] = []
-    job_meta: list[tuple] = []
+    group_specs: list[dict] = []
+    total_farmers = 0
+    all_render_jobs: list[tuple] = []
 
-    for group_key_val, group_df in grouped:
+    for g_idx, (group_key_val, group_df) in enumerate(grouped):
         if not isinstance(group_key_val, tuple):
             group_key_tuple = (group_key_val,)
         else:
             group_key_tuple = group_key_val
 
-        # Extract names safely
         prov_name = str(group_key_tuple[0]) if len(group_key_tuple) > 0 else ""
         muni_name = str(group_key_tuple[1]) if len(group_key_tuple) > 1 else ""
         brgy_name = str(group_key_tuple[2]) if len(group_key_tuple) > 2 else prov_name
@@ -780,7 +813,6 @@ def run_batch_generation(
         if not any(group_key_tuple):
             continue
 
-        # Sort farmers strictly alphabetically by farmer name
         group_df = group_df.copy()
         group_df['_sort_key'] = group_df.apply(
             lambda r: _get_row_sort_name(r.to_dict(), template_mapping or transmittal_mapping),
@@ -789,7 +821,6 @@ def run_batch_generation(
         group_df = group_df.sort_values(by='_sort_key', ascending=True, kind='mergesort')
         group_df = group_df.drop(columns=['_sort_key'])
 
-        # 1. Transmittal Data
         farmers_list = []
         for _, row in group_df.iterrows():
             r_d = row.to_dict()
@@ -806,12 +837,11 @@ def run_batch_generation(
                     ctx[r_k] = r_v
             farmers_list.append(ctx)
 
-        # Ensure farmers_list is strictly sorted alphabetically
         farmers_list.sort(key=lambda x: str(x.get('Full_Name') or x.get('Fullname') or x.get('Name') or '').strip().upper())
 
-        # 2. Submit Transmittal Job
-        transmittal_idx = len(jobs)
-        transmittal_ctx = {
+        trans_docx = tmp_path / f"trans_{g_idx:04d}.docx"
+        trans_pdf = tmp_path / f"trans_{g_idx:04d}.pdf"
+        trans_ctx = {
             'barangay': brgy_name,
             'municipality': muni_name,
             'province': prov_name,
@@ -822,161 +852,159 @@ def run_batch_generation(
         if transmittal_mapping:
             for tag, val in transmittal_mapping.items():
                 if val.startswith('STATIC:'):
-                    transmittal_ctx[tag] = val[7:]
+                    trans_ctx[tag] = val[7:]
 
-        trans_docx = tmp_path / f"form_{transmittal_idx:05d}.docx"
-        trans_pdf = tmp_path / f"form_{transmittal_idx:05d}.pdf"
-        jobs.append((
-            transmittal_idx,
-            transmittal_ctx,
-            transmittal_template,
-            str(trans_docx.resolve()),
-            str(trans_pdf.resolve()),
-        ))
-        job_meta.append((prov_name, muni_name, brgy_name, True))
+        all_render_jobs.append((f"trans_{g_idx}", trans_ctx, transmittal_template, str(trans_docx.resolve())))
 
-        # 3. Submit Individual Form Jobs
-        for _, row in group_df.iterrows():
-            worker_idx = len(jobs)
-            f_docx = tmp_path / f"form_{worker_idx:05d}.docx"
-            f_pdf = tmp_path / f"form_{worker_idx:05d}.pdf"
-            jobs.append((
-                worker_idx,
+        form_docx_paths = []
+        for f_idx, (_, row) in enumerate(group_df.iterrows()):
+            f_docx = tmp_path / f"form_{g_idx:04d}_{f_idx:04d}.docx"
+            form_docx_paths.append(str(f_docx.resolve()))
+            all_render_jobs.append((
+                f"form_{g_idx}_{f_idx}",
                 _build_context(row.to_dict(), template_mapping),
                 template_file,
-                str(f_docx.resolve()),
-                str(f_pdf.resolve()),
+                str(f_docx.resolve())
             ))
-            job_meta.append((prov_name, muni_name, brgy_name, False))
 
-    total_jobs = len(jobs)
-    pdf_results: dict[int, Path | None] = {}
+        forms_bundle_docx = tmp_path / f"forms_bundle_{g_idx:04d}.docx"
+        forms_bundle_pdf = tmp_path / f"forms_bundle_{g_idx:04d}.pdf"
+
+        group_specs.append({
+            "group_idx": g_idx,
+            "prov": prov_name,
+            "muni": muni_name,
+            "brgy": brgy_name,
+            "trans_docx": trans_docx,
+            "trans_pdf": trans_pdf,
+            "form_docx_paths": form_docx_paths,
+            "forms_bundle_docx": forms_bundle_docx,
+            "forms_bundle_pdf": forms_bundle_pdf,
+            "count": len(group_df)
+        })
+        total_farmers += len(group_df)
+
+    total_render_tasks = len(all_render_jobs)
     error_count = 0
-
     lo_bin = _find_libreoffice()
 
-    # ── PHASE 1: Render .docx templates in parallel (Pure Python, fast, zero deadlock) ──
-    log(f"Phase 1/3: Rendering {total_jobs} document templates across {max_workers} parallel workers...")
+    log(f"Phase 1/4: Rendering {total_render_tasks} templates across {max_workers} parallel workers...")
     if progress_callback:
         progress_callback({
             "type": "progress",
             "current": 0,
-            "total": total_jobs,
+            "total": total_farmers,
             "percent": 0,
             "failed": 0,
             "status_text": "Filling document templates..."
         })
 
-    docx_tasks: list[tuple[int, Path, Path]] = []
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as pool:
-        docx_futures = {
-            pool.submit(_render_one_docx, (j[0], j[1], j[2], j[3])): (j[0], Path(j[3]), Path(j[4]))
-            for j in jobs
-        }
-        docx_done = 0
-        for future in concurrent.futures.as_completed(docx_futures):
-            worker_idx, docx_path, err = future.result()
-            docx_done += 1
+        futures = {pool.submit(_render_one_docx, job): job[0] for job in all_render_jobs}
+        r_done = 0
+        for future in concurrent.futures.as_completed(futures):
+            job_id, docx_path, err = future.result()
+            r_done += 1
             if err:
-                log(f"Template [{docx_done}/{total_jobs}] FAILED: {err}", "warning")
+                log(f"Template [{r_done}/{total_render_tasks}] FAILED: {err}", "warning")
                 error_count += 1
-            else:
-                _, d_path, p_path = docx_futures[future]
-                docx_tasks.append((worker_idx, d_path, p_path))
-
-            if progress_callback and (docx_done % 15 == 0 or docx_done == total_jobs):
+            if progress_callback and (r_done % 25 == 0 or r_done == total_render_tasks):
                 progress_callback({
                     "type": "progress",
                     "current": 0,
-                    "total": total_jobs,
-                    "percent": int((docx_done / total_jobs) * 15),
+                    "total": total_farmers,
+                    "percent": int((r_done / max(total_render_tasks, 1)) * 25),
                     "failed": error_count,
-                    "status_text": f"Filling templates ({docx_done}/{total_jobs})..."
+                    "status_text": f"Filling templates ({r_done}/{total_render_tasks})..."
                 })
 
-    docx_tasks.sort(key=lambda x: x[0])
+    log(f"Phase 2/4: Composing forms into {len(group_specs)} consolidated Barangay bundles...")
+    compose_jobs = [
+        (g["group_idx"], g["form_docx_paths"], str(g["forms_bundle_docx"].resolve()))
+        for g in group_specs if g["form_docx_paths"]
+    ]
 
-    # ── PHASE 2: Convert to PDF ──────────────────────────────────────────
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as pool:
+        c_futures = {pool.submit(_compose_group_forms, cj): cj[0] for cj in compose_jobs}
+        c_done = 0
+        for future in concurrent.futures.as_completed(c_futures):
+            g_idx, b_path, err = future.result()
+            c_done += 1
+            if err:
+                log(f"Bundle composition warning: {err}", "warning")
+            if progress_callback and (c_done % 5 == 0 or c_done == len(compose_jobs)):
+                pct = 25 + int((c_done / max(len(compose_jobs), 1)) * 10)
+                progress_callback({
+                    "type": "progress",
+                    "current": 0,
+                    "total": total_farmers,
+                    "percent": pct,
+                    "failed": error_count,
+                    "status_text": f"Composing bundles ({c_done}/{len(compose_jobs)})..."
+                })
+
+    conv_tasks: list[tuple[any, Path, Path]] = []
+    for g in group_specs:
+        if g["trans_docx"].exists():
+            conv_tasks.append((f"trans_{g['group_idx']}", g["trans_docx"], g["trans_pdf"]))
+        if g["forms_bundle_docx"].exists():
+            conv_tasks.append((f"forms_{g['group_idx']}", g["forms_bundle_docx"], g["forms_bundle_pdf"]))
+
+    log(f"Phase 3/4: Converting {len(conv_tasks)} consolidated bundle files to PDF...")
+
     if lo_bin:
-        log(f"Phase 2/3: Converting {len(docx_tasks)} documents to PDF using LibreOffice parallel engine...")
         lo_profile_base = (tmp_path / "lo_profiles").resolve()
         lo_profile_base.mkdir(parents=True, exist_ok=True)
-
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as pool:
             lo_futures = {}
-            for worker_idx, d_path, p_path in docx_tasks:
-                lo_profile_dir = lo_profile_base / f"lo_{worker_idx:05d}"
+            for t_id, d_path, p_path in conv_tasks:
+                lo_profile_dir = lo_profile_base / f"lo_{t_id}"
                 lo_profile_dir.mkdir(parents=True, exist_ok=True)
                 lo_args = (
-                    worker_idx,
+                    t_id,
                     str(d_path.resolve()),
                     str(tmp_path.resolve()),
                     lo_bin,
                     lo_profile_dir.as_uri(),
                     str(p_path.resolve())
                 )
-                lo_futures[pool.submit(_convert_one_lo, lo_args)] = worker_idx
+                lo_futures[pool.submit(_convert_one_lo, lo_args)] = t_id
 
             conv_done = 0
             for future in concurrent.futures.as_completed(lo_futures):
-                worker_idx, pdf_path, err = future.result()
+                t_id, pdf_path, err = future.result()
                 conv_done += 1
                 if err:
-                    log(f"PDF [{conv_done}/{total_jobs}] FAILED: {err}", "warning")
+                    log(f"Conversion [{conv_done}/{len(conv_tasks)}] FAILED: {err}", "warning")
                     error_count += 1
-                else:
-                    pdf_results[worker_idx] = pdf_path
-
-                if progress_callback and (conv_done % 5 == 0 or conv_done == total_jobs):
-                    pct = 15 + int((conv_done / total_jobs) * 70)
+                if progress_callback and (conv_done % 2 == 0 or conv_done == len(conv_tasks)):
+                    pct = 35 + int((conv_done / max(len(conv_tasks), 1)) * 50)
                     progress_callback({
                         "type": "progress",
-                        "current": conv_done,
-                        "total": total_jobs,
+                        "current": 0,
+                        "total": total_farmers,
                         "percent": pct,
                         "failed": error_count,
-                        "status_text": f"Converting to PDF ({conv_done}/{total_jobs})..."
+                        "status_text": f"Converting PDF bundles ({conv_done}/{len(conv_tasks)})..."
                     })
     else:
-        log(f"Phase 2/3: Converting {len(docx_tasks)} documents to PDF using Microsoft Word COM engine...")
         word_results, word_errors = _convert_all_word_com(
-            docx_tasks=docx_tasks,
+            docx_tasks=conv_tasks,
             log_func=log,
             progress_callback=progress_callback,
-            total_jobs=total_jobs,
-            start_percent=15,
+            total_jobs=len(conv_tasks),
+            start_percent=35,
             end_percent=85
         )
-        pdf_results.update(word_results)
         error_count += word_errors
 
-    log(f"PDF rendering complete — {len(pdf_results)}/{total_jobs} PDFs rendered successfully.")
-
-    # ── PHASE 3: Bundle Merging ──────────────────────────────────────────
-    log("Phase 3/3: Merging PDF bundles by grouping rules...")
-    bundle_transmittals: dict[tuple, Path] = {}
-    bundle_forms: dict[tuple, list[Path]] = defaultdict(list)
-
-    for worker_idx, meta in enumerate(job_meta):
-        prov, muni, brgy, is_trans = meta
-        group_key = (prov, muni, brgy)
-        pdf_path = pdf_results.get(worker_idx)
-        if pdf_path:
-            if is_trans:
-                bundle_transmittals[group_key] = pdf_path
-            else:
-                bundle_forms[group_key].append(pdf_path)
-
+    log(f"Phase 4/4: Packaging {len(group_specs)} Barangay PDF bundles...")
     total_merged = 0
-    total_bundles = len(bundle_forms)
-    bundle_num = 0
 
-    for group_key, form_list in bundle_forms.items():
-        bundle_num += 1
-        prov, muni, brgy = group_key
-        safe_prov = safe_filename(prov)
-        safe_muni = safe_filename(muni)
-        safe_brgy = safe_filename(brgy)
+    for b_idx, g in enumerate(group_specs, 1):
+        safe_prov = safe_filename(g["prov"])
+        safe_muni = safe_filename(g["muni"])
+        safe_brgy = safe_filename(g["brgy"])
 
         if safe_prov and safe_muni:
             target_dir = out_path / f"{safe_prov}, {safe_muni}"
@@ -986,46 +1014,41 @@ def run_batch_generation(
             target_dir = out_path
 
         target_dir.mkdir(parents=True, exist_ok=True)
-
-        merged_path = target_dir / f"Bundle_{safe_brgy}_{len(form_list)}_Forms.pdf"
-        log(f"Merging bundle [{bundle_num}/{total_bundles}]: {merged_path.name}")
+        merged_path = target_dir / f"Bundle_{safe_brgy}_{g['count']}_Forms.pdf"
+        log(f"Packaging bundle [{b_idx}/{len(group_specs)}]: {merged_path.name}")
 
         merger = PdfWriter()
-        trans_pdf = bundle_transmittals.get(group_key)
-        if trans_pdf:
-            merger.append(str(trans_pdf))
-
-        for p_file in form_list:
-            merger.append(str(p_file))
+        if g["trans_pdf"].exists():
+            merger.append(str(g["trans_pdf"]))
+        if g["forms_bundle_pdf"].exists():
+            merger.append(str(g["forms_bundle_pdf"]))
 
         with open(merged_path, "wb") as f:
             merger.write(f)
 
-        total_merged += len(form_list)
+        total_merged += g["count"]
 
         if progress_callback:
-            merge_pct = 85 + int((bundle_num / max(total_bundles, 1)) * 14)
+            pct = 85 + int((b_idx / max(len(group_specs), 1)) * 14)
             progress_callback({
                 "type": "progress",
-                "current": total_jobs - error_count,
-                "total": total_jobs,
-                "percent": min(merge_pct, 99),
+                "current": total_merged,
+                "total": total_farmers,
+                "percent": min(pct, 99),
                 "failed": error_count,
-                "status_text": f"Merging bundle {bundle_num}/{total_bundles}..."
+                "status_text": f"Packaging bundle {b_idx}/{len(group_specs)}..."
             })
 
-    # Final 100% update
     if progress_callback:
         progress_callback({
             "type": "progress",
-            "current": total_jobs - error_count,
-            "total": total_jobs,
+            "current": total_farmers,
+            "total": total_farmers,
             "percent": 100,
             "failed": error_count,
             "status_text": "Batch Processing Complete!"
         })
 
-    # Cleanup temp directory if no errors
     if error_count == 0:
         log("No errors recorded — cleaning up temporary files.")
         shutil.rmtree(tmp_path, ignore_errors=True)
@@ -1033,7 +1056,7 @@ def run_batch_generation(
     log(f"Batch execution finished! {total_merged} application forms merged into '{out_path}/'.", "success")
 
     return {
-        "total_rendered": total_jobs - error_count,
+        "total_rendered": total_farmers - error_count,
         "total_failed": error_count,
         "total_merged": total_merged,
         "output_directory": str(out_path.resolve())

@@ -3,5 +3,6 @@ pandas>=2.0.0
 openpyxl>=3.1.0
 python-docx>=1.0.0
 docxtpl>=0.19.0
+docxcompose>=2.2.0
 pypdf>=4.0.0
 pywin32>=306; sys_platform == 'win32'

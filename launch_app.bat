@@ -72,7 +72,7 @@ echo [INFO] Using Python: %PYTHON_EXE%
 
 :: Ensure requirements are installed
 echo [INFO] Verifying dependencies...
-"%PYTHON_EXE%" -c "import flask, pandas, openpyxl, docxtpl, docx, pypdf, win32com.client" >nul 2>nul
+"%PYTHON_EXE%" -c "import flask, pandas, openpyxl, docxtpl, docx, pypdf, win32com.client, docxcompose" >nul 2>nul
 if errorlevel 1 (
     echo [INFO] Installing required dependencies...
     "%PYTHON_EXE%" -m pip install -r requirements.txt
