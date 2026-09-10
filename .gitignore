@@ -26,6 +26,7 @@ scratch/
 
 # Excluded data folders
 CFTIF Database for Forms Generator/
+CFITF Files/
 
 # IDEs and OS metadata
 .DS_Store

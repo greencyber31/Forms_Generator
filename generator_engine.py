@@ -560,14 +560,14 @@ def _convert_one_lo(args: tuple):
             ],
             capture_output=True,
             text=True,
-            timeout=45,
+            timeout=300,
             check=False,
         )
         if result.returncode == 0 and temp_pdf_path.exists() and temp_pdf_path.stat().st_size > 0:
             return worker_idx, temp_pdf_path, None
         return worker_idx, None, f"LibreOffice rc={result.returncode}: {result.stderr.strip()}"
     except subprocess.TimeoutExpired:
-        return worker_idx, None, "LibreOffice conversion timed out after 45s"
+        return worker_idx, None, "LibreOffice conversion timed out after 300s"
     except Exception as exc:
         return worker_idx, None, str(exc)
 
@@ -575,7 +575,8 @@ def _convert_one_lo(args: tuple):
 def _compose_group_forms(args: tuple):
     """
     Combines individual farmer application forms for a single group into one consolidated multi-page DOCX.
-    Because all forms share the exact same A4 page setup and 3.05mm margins, each form remains strictly 1 page.
+    Sets page_break_before on the first paragraph of every appended document to ensure that each
+    form strictly begins at the top of a new page, preventing headers from spilling onto previous pages.
     """
     group_idx, form_paths, out_bundle_docx_str = args
     if not form_paths:
@@ -583,12 +584,43 @@ def _compose_group_forms(args: tuple):
     try:
         from docxcompose.composer import Composer
         from docx import Document
+        from docx.shared import Pt
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
 
         master = Document(form_paths[0])
+        # Minimize trailing empty paragraph height in master
+        if master.paragraphs and not master.paragraphs[-1].text.strip():
+            master.paragraphs[-1].paragraph_format.space_before = Pt(0)
+            master.paragraphs[-1].paragraph_format.space_after = Pt(0)
+            master.paragraphs[-1].paragraph_format.line_spacing = Pt(1)
+
         if len(form_paths) > 1:
             composer = Composer(master)
             for p in form_paths[1:]:
-                composer.append(Document(p))
+                doc_to_append = Document(p)
+                # Minimize trailing empty paragraph height in appended document
+                if doc_to_append.paragraphs and not doc_to_append.paragraphs[-1].text.strip():
+                    doc_to_append.paragraphs[-1].paragraph_format.space_before = Pt(0)
+                    doc_to_append.paragraphs[-1].paragraph_format.space_after = Pt(0)
+                    doc_to_append.paragraphs[-1].paragraph_format.line_spacing = Pt(1)
+
+                # Ensure the appended document strictly starts at the top of a new page
+                if doc_to_append.paragraphs:
+                    doc_to_append.paragraphs[0].paragraph_format.page_break_before = True
+                elif doc_to_append.element.body and doc_to_append.element.body[0].tag.endswith('tbl'):
+                    p_el = OxmlElement('w:p')
+                    pPr = OxmlElement('w:pPr')
+                    pPr.append(OxmlElement('w:pageBreakBefore'))
+                    sp = OxmlElement('w:spacing')
+                    sp.set(qn('w:before'), '0')
+                    sp.set(qn('w:after'), '0')
+                    pPr.append(sp)
+                    p_el.append(pPr)
+                    doc_to_append.element.body.insert(0, p_el)
+
+                composer.append(doc_to_append)
+
             composer.save(out_bundle_docx_str)
         else:
             master.save(out_bundle_docx_str)
