@@ -324,6 +324,12 @@ def render_sample_pdf_preview(
 
         tpl.render(context)
         
+        try:
+            from generator_engine import _ensure_header_on_all_pages
+            _ensure_header_on_all_pages(tpl.docx)
+        except Exception:
+            pass
+
         out_dir = Path(temp_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         unique_id = uuid.uuid4().hex[:8]

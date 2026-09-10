@@ -534,10 +534,64 @@ def _render_one_docx(args: tuple):
             section.page_width  = Mm(210)
             section.page_height = Mm(297)
 
+        _ensure_header_on_all_pages(doc.docx)
+
         doc.save(temp_docx_path)
         return worker_idx, temp_docx_path, None
     except Exception as exc:
         return worker_idx, None, str(exc)
+
+
+def _ensure_header_on_all_pages(doc):
+    """
+    Ensures that if the template uses 'Different First Page' (w:titlePg) where the header banner
+    is defined only on the first page, all subsequent pages in the document (and consolidated bundles)
+    also display that same primary header and footer.
+    """
+    try:
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+
+        for section in doc.sections:
+            sectPr = section._sectPr
+
+            first_hr_id = None
+            for hr in sectPr.findall(qn('w:headerReference')):
+                if hr.get(qn('w:type')) == 'first':
+                    first_hr_id = hr.get(qn('r:id'))
+                    break
+
+            title_pg_elements = sectPr.findall(qn('w:titlePg'))
+            if first_hr_id and title_pg_elements:
+                # Remove titlePg so Word applies the default header uniformly across all pages
+                for title_pg in title_pg_elements:
+                    sectPr.remove(title_pg)
+
+                # Remove existing header references
+                for hr in sectPr.findall(qn('w:headerReference')):
+                    sectPr.remove(hr)
+
+                # Set default header to point to the primary banner header
+                new_hr = OxmlElement('w:headerReference')
+                new_hr.set(qn('w:type'), 'default')
+                new_hr.set(qn('r:id'), first_hr_id)
+                sectPr.insert(0, new_hr)
+
+            first_fr_id = None
+            for fr in sectPr.findall(qn('w:footerReference')):
+                if fr.get(qn('w:type')) == 'first':
+                    first_fr_id = fr.get(qn('r:id'))
+                    break
+
+            if first_fr_id and title_pg_elements:
+                for fr in sectPr.findall(qn('w:footerReference')):
+                    sectPr.remove(fr)
+                new_fr = OxmlElement('w:footerReference')
+                new_fr.set(qn('w:type'), 'default')
+                new_fr.set(qn('r:id'), first_fr_id)
+                sectPr.insert(1, new_fr)
+    except Exception:
+        pass
 
 
 def _convert_one_lo(args: tuple):
@@ -621,8 +675,10 @@ def _compose_group_forms(args: tuple):
 
                 composer.append(doc_to_append)
 
+            _ensure_header_on_all_pages(master)
             composer.save(out_bundle_docx_str)
         else:
+            _ensure_header_on_all_pages(master)
             master.save(out_bundle_docx_str)
         return group_idx, Path(out_bundle_docx_str), None
     except Exception as exc:
