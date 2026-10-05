@@ -12,16 +12,19 @@ from pypdf import PdfReader
 
 from template_builder import extract_excel_headers, extract_docx_tags, auto_match_tags, render_sample_pdf_preview, render_docx_to_pdf_preview
 from generator_engine import run_batch_generation
+from mapping_manager import save_mapping_profile, list_saved_profiles, find_best_matching_profile, apply_mapping_to_headers, delete_mapping_profile
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.abspath("uploads")
 app.config['OUTPUT_FOLDER'] = os.path.abspath("output")
 app.config['TEMP_FOLDER']   = os.path.abspath("temp_docs")
+app.config['MAPPINGS_FOLDER'] = os.path.abspath("mappings")
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 
 Path(app.config['UPLOAD_FOLDER']).mkdir(parents=True, exist_ok=True)
 Path(app.config['OUTPUT_FOLDER']).mkdir(parents=True, exist_ok=True)
 Path(app.config['TEMP_FOLDER']).mkdir(parents=True, exist_ok=True)
+Path(app.config['MAPPINGS_FOLDER']).mkdir(parents=True, exist_ok=True)
 
 workspace_state = {
     "excel_file": None,
@@ -34,7 +37,8 @@ workspace_state = {
         "template": {},
         "transmittal": {}
     },
-    "transmittal_columns": []
+    "transmittal_columns": [],
+    "active_mapping_profile": None
 }
 
 def build_default_transmittal_columns(headers):
@@ -110,6 +114,47 @@ def init_workspace():
         except Exception:
             pass
 
+    # Check if a matching saved mapping profile exists on disk
+    if workspace_state["headers"]:
+        best_prof, sim = find_best_matching_profile(workspace_state["headers"], min_threshold=0.55)
+        if best_prof:
+            adapted = apply_mapping_to_headers(
+                best_prof,
+                workspace_state["headers"],
+                workspace_state["app_docx_tags"],
+                workspace_state["trans_docx_tags"]
+            )
+            workspace_state["mappings"]["template"] = adapted["template_mapping"]
+            workspace_state["mappings"]["transmittal"] = adapted["transmittal_mapping"]
+            workspace_state["transmittal_columns"] = adapted["transmittal_columns"]
+            workspace_state["active_mapping_profile"] = {
+                "id": best_prof["id"],
+                "name": best_prof.get("name", "Saved Preset"),
+                "source_file": best_prof.get("source_file", ""),
+                "similarity": sim
+            }
+        else:
+            # If no profiles exist in mappings/, save initial baseline profile
+            existing_profiles = list_saved_profiles()
+            if not existing_profiles and workspace_state["excel_file"]:
+                try:
+                    baseline = save_mapping_profile(
+                        excel_filename=workspace_state["excel_file"],
+                        headers=workspace_state["headers"],
+                        template_mapping=workspace_state["mappings"].get("template"),
+                        transmittal_mapping=workspace_state["mappings"].get("transmittal"),
+                        transmittal_columns=workspace_state["transmittal_columns"],
+                        profile_name="CFITF Standard Template"
+                    )
+                    workspace_state["active_mapping_profile"] = {
+                        "id": baseline["id"],
+                        "name": baseline["name"],
+                        "source_file": baseline.get("source_file", ""),
+                        "similarity": 1.0
+                    }
+                except Exception:
+                    pass
+
 init_workspace()
 
 @app.route('/')
@@ -126,7 +171,8 @@ def get_workspace():
         "app_docx_tags": workspace_state["app_docx_tags"],
         "trans_docx_tags": workspace_state["trans_docx_tags"],
         "mappings": workspace_state["mappings"],
-        "transmittal_columns": workspace_state["transmittal_columns"]
+        "transmittal_columns": workspace_state["transmittal_columns"],
+        "active_mapping_profile": workspace_state.get("active_mapping_profile")
     })
 
 @app.route('/api/upload', methods=['POST'])
@@ -144,17 +190,39 @@ def upload_file():
     file.save(save_path)
 
     excel_raw_headers = [h["original"] for h in workspace_state["headers"]]
+    remembered_info = None
 
     if file_type == 'excel':
         workspace_state["excel_file"] = save_path
         workspace_state["headers"] = extract_excel_headers(save_path)
-        workspace_state["transmittal_columns"] = build_default_transmittal_columns(workspace_state["headers"])
         excel_raw_headers = [h["original"] for h in workspace_state["headers"]]
-        # Re-run auto-match with new excel headers
-        if workspace_state["template_file"]:
-            workspace_state["mappings"]["template"] = auto_match_tags(excel_raw_headers, workspace_state["app_docx_tags"])
-        if workspace_state["transmittal_template"]:
-            workspace_state["mappings"]["transmittal"] = auto_match_tags(excel_raw_headers, workspace_state["trans_docx_tags"])
+
+        # Check for similar headers among previously saved mappings!
+        best_prof, sim = find_best_matching_profile(workspace_state["headers"], min_threshold=0.55)
+        if best_prof:
+            adapted = apply_mapping_to_headers(
+                best_prof,
+                workspace_state["headers"],
+                workspace_state["app_docx_tags"],
+                workspace_state["trans_docx_tags"]
+            )
+            workspace_state["mappings"]["template"] = adapted["template_mapping"]
+            workspace_state["mappings"]["transmittal"] = adapted["transmittal_mapping"]
+            workspace_state["transmittal_columns"] = adapted["transmittal_columns"]
+            remembered_info = {
+                "profile_id": best_prof["id"],
+                "profile_name": best_prof.get("name", "Saved Preset"),
+                "source_file": best_prof.get("source_file", ""),
+                "similarity": sim
+            }
+            workspace_state["active_mapping_profile"] = remembered_info
+        else:
+            workspace_state["transmittal_columns"] = build_default_transmittal_columns(workspace_state["headers"])
+            if workspace_state["template_file"]:
+                workspace_state["mappings"]["template"] = auto_match_tags(excel_raw_headers, workspace_state["app_docx_tags"])
+            if workspace_state["transmittal_template"]:
+                workspace_state["mappings"]["transmittal"] = auto_match_tags(excel_raw_headers, workspace_state["trans_docx_tags"])
+            workspace_state["active_mapping_profile"] = None
 
     elif file_type == 'template':
         workspace_state["template_file"] = save_path
@@ -171,6 +239,7 @@ def upload_file():
     return jsonify({
         "message": f"Successfully uploaded {filename}",
         "file_type": file_type,
+        "remembered_mapping": remembered_info,
         "workspace": {
             "excel_file": os.path.basename(workspace_state["excel_file"]) if workspace_state["excel_file"] else None,
             "template_file": os.path.basename(workspace_state["template_file"]) if workspace_state["template_file"] else None,
@@ -179,7 +248,8 @@ def upload_file():
             "app_docx_tags": workspace_state["app_docx_tags"],
             "trans_docx_tags": workspace_state["trans_docx_tags"],
             "mappings": workspace_state["mappings"],
-            "transmittal_columns": workspace_state["transmittal_columns"]
+            "transmittal_columns": workspace_state["transmittal_columns"],
+            "active_mapping_profile": workspace_state.get("active_mapping_profile")
         }
     })
 
@@ -197,7 +267,8 @@ def handle_mapping():
             "docx_tags": docx_tags,
             "excel_headers": excel_headers,
             "mapping": current_mapping,
-            "auto_mappings": auto_mappings
+            "auto_mappings": auto_mappings,
+            "active_profile": workspace_state.get("active_mapping_profile")
         })
 
     elif request.method == 'POST':
@@ -206,10 +277,31 @@ def handle_mapping():
         mapping = data.get('mapping', {})
 
         workspace_state["mappings"][doc_type] = mapping
+
+        # Persist updated mapping to disk associated with the current Excel dataset
+        if workspace_state["excel_file"] and workspace_state["headers"]:
+            try:
+                saved_prof = save_mapping_profile(
+                    excel_filename=workspace_state["excel_file"],
+                    headers=workspace_state["headers"],
+                    template_mapping=workspace_state["mappings"].get("template"),
+                    transmittal_mapping=workspace_state["mappings"].get("transmittal"),
+                    transmittal_columns=workspace_state.get("transmittal_columns")
+                )
+                workspace_state["active_mapping_profile"] = {
+                    "id": saved_prof["id"],
+                    "name": saved_prof["name"],
+                    "source_file": saved_prof.get("source_file", ""),
+                    "similarity": 1.0
+                }
+            except Exception:
+                pass
+
         trigger_background_preview_warmup()
         return jsonify({
             "message": f"Saved field mappings for {doc_type}!",
-            "mapping": mapping
+            "mapping": mapping,
+            "active_profile": workspace_state.get("active_mapping_profile")
         })
 
 @app.route('/api/template/auto-match', methods=['POST'])
@@ -221,11 +313,32 @@ def auto_match_route():
 
     auto_map = auto_match_tags(excel_headers, docx_tags)
     workspace_state["mappings"][doc_type] = auto_map
+
+    # Persist updated mapping to disk
+    if workspace_state["excel_file"] and workspace_state["headers"]:
+        try:
+            saved_prof = save_mapping_profile(
+                excel_filename=workspace_state["excel_file"],
+                headers=workspace_state["headers"],
+                template_mapping=workspace_state["mappings"].get("template"),
+                transmittal_mapping=workspace_state["mappings"].get("transmittal"),
+                transmittal_columns=workspace_state.get("transmittal_columns")
+            )
+            workspace_state["active_mapping_profile"] = {
+                "id": saved_prof["id"],
+                "name": saved_prof["name"],
+                "source_file": saved_prof.get("source_file", ""),
+                "similarity": 1.0
+            }
+        except Exception:
+            pass
+
     trigger_background_preview_warmup()
 
     return jsonify({
         "message": f"Auto-matched {len(auto_map)} field tags!",
-        "mapping": auto_map
+        "mapping": auto_map,
+        "active_profile": workspace_state.get("active_mapping_profile")
     })
 
 @app.route('/api/template/transmittal-columns', methods=['GET', 'POST'])
@@ -234,17 +347,103 @@ def handle_transmittal_columns():
         if not workspace_state["transmittal_columns"] and workspace_state["headers"]:
             workspace_state["transmittal_columns"] = build_default_transmittal_columns(workspace_state["headers"])
         return jsonify({
-            "columns": workspace_state["transmittal_columns"]
+            "columns": workspace_state["transmittal_columns"],
+            "active_profile": workspace_state.get("active_mapping_profile")
         })
     elif request.method == 'POST':
         data = request.json
         cols = data.get('columns', [])
         workspace_state["transmittal_columns"] = cols
+
+        # Persist updated transmittal columns to disk
+        if workspace_state["excel_file"] and workspace_state["headers"]:
+            try:
+                saved_prof = save_mapping_profile(
+                    excel_filename=workspace_state["excel_file"],
+                    headers=workspace_state["headers"],
+                    template_mapping=workspace_state["mappings"].get("template"),
+                    transmittal_mapping=workspace_state["mappings"].get("transmittal"),
+                    transmittal_columns=workspace_state["transmittal_columns"]
+                )
+                workspace_state["active_mapping_profile"] = {
+                    "id": saved_prof["id"],
+                    "name": saved_prof["name"],
+                    "source_file": saved_prof.get("source_file", ""),
+                    "similarity": 1.0
+                }
+            except Exception:
+                pass
+
         trigger_background_preview_warmup()
         return jsonify({
             "message": "Saved transmittal columns configuration!",
-            "columns": cols
+            "columns": cols,
+            "active_profile": workspace_state.get("active_mapping_profile")
         })
+
+@app.route('/api/mappings/list', methods=['GET'])
+def list_mappings_route():
+    profiles = list_saved_profiles(workspace_state.get("headers", []))
+    return jsonify({
+        "profiles": profiles,
+        "active_profile": workspace_state.get("active_mapping_profile")
+    })
+
+@app.route('/api/mappings/apply', methods=['POST'])
+def apply_mapping_route():
+    data = request.json or {}
+    profile_id = data.get('profile_id')
+    if not profile_id:
+        return jsonify({"error": "No profile_id provided"}), 400
+
+    profiles = list_saved_profiles(workspace_state.get("headers", []))
+    target_prof = next((p for p in profiles if p["id"] == profile_id), None)
+    if not target_prof:
+        return jsonify({"error": "Mapping profile not found"}), 404
+
+    adapted = apply_mapping_to_headers(
+        target_prof,
+        workspace_state["headers"],
+        workspace_state["app_docx_tags"],
+        workspace_state["trans_docx_tags"]
+    )
+    workspace_state["mappings"]["template"] = adapted["template_mapping"]
+    workspace_state["mappings"]["transmittal"] = adapted["transmittal_mapping"]
+    workspace_state["transmittal_columns"] = adapted["transmittal_columns"]
+
+    sim = target_prof.get("similarity", 1.0)
+    workspace_state["active_mapping_profile"] = {
+        "id": target_prof["id"],
+        "name": target_prof.get("name", "Saved Preset"),
+        "source_file": target_prof.get("source_file", ""),
+        "similarity": sim
+    }
+
+    trigger_background_preview_warmup()
+
+    return jsonify({
+        "message": f"Applied preset '{target_prof.get('name')}'!",
+        "active_profile": workspace_state["active_mapping_profile"],
+        "workspace": {
+            "mappings": workspace_state["mappings"],
+            "transmittal_columns": workspace_state["transmittal_columns"]
+        }
+    })
+
+@app.route('/api/mappings/delete', methods=['POST'])
+def delete_mapping_route():
+    data = request.json or {}
+    profile_id = data.get('profile_id')
+    if not profile_id:
+        return jsonify({"error": "No profile_id provided"}), 400
+
+    success = delete_mapping_profile(profile_id)
+    if success:
+        if workspace_state.get("active_mapping_profile", {}).get("id") == profile_id:
+            workspace_state["active_mapping_profile"] = None
+        return jsonify({"message": f"Deleted profile {profile_id}"})
+    else:
+        return jsonify({"error": "Could not delete profile"}), 500
 
 def _background_render_preview(doc_type: str):
     try:

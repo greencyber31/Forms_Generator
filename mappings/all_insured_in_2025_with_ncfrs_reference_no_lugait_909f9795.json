@@ -1,0 +1,257 @@
+{
+  "id": "all_insured_in_2025_with_ncfrs_reference_no_lugait_909f9795",
+  "name": "All_Insured_in_2025_with_NCFRS_Reference_No_Lugait.xlsx",
+  "source_file": "All_Insured_in_2025_with_NCFRS_Reference_No_Lugait.xlsx",
+  "excel_headers": [
+    "REGION",
+    "LOGBOOK",
+    "FARMER ID",
+    "CFITF No",
+    "RSBSA No.",
+    "FARMER NAME",
+    "GENDER",
+    "IP NO",
+    "EFFECTIVITY DATE",
+    "EXPIRY DATE",
+    "PROGRAM TYPE",
+    "OR NUMBER",
+    "OR DATE",
+    "OR AMOUNT",
+    "LENDER NAME",
+    "GROUP NAME",
+    "DATE PLANTING",
+    "DATE OF HARVEST",
+    "VARIETY",
+    "FARMID",
+    "AREA",
+    "HILLS",
+    "FARM NAME",
+    "GEOREF ID",
+    "PROVINCE",
+    "MUNICIPALITY",
+    "BARANGAY",
+    "NORTH",
+    "EAST",
+    "WEST",
+    "SOUTH",
+    "AMOUNT OF COVER",
+    "PREMIUM",
+    "PREMIUM TAX",
+    "APPID",
+    "PRODUCTION DATE"
+  ],
+  "template_mapping": {
+    "LOGBOOK": "LOGBOOK",
+    "Crop": "STATIC:COCONUT",
+    "FarmerID": "FARMER ID",
+    "Area": "AREA",
+    "Last_Name": "FARMER NAME",
+    "Home_Barangay": "BARANGAY",
+    "Home_Municipality": "MUNICIPALITY",
+    "Home_Province": "PROVINCE",
+    "Gender": "GENDER",
+    "PBene_Last_Name": "__BLANK_UNDERLINE__",
+    "PBene_First_Name": "__BLANK_UNDERLINE__",
+    "PBene_Middle_Name": "__BLANK_UNDERLINE__",
+    "Farm_Barangay": "BARANGAY",
+    "Farm_Municipality": "MUNICIPALITY",
+    "Farm_Province": "PROVINCE",
+    "North": "NORTH",
+    "East": "EAST",
+    "South": "SOUTH",
+    "West": "WEST",
+    "GeoRef": "GEOREF ID",
+    "FarmID": "FARMID",
+    "Variety": "VARIETY",
+    "Date_Planting": "DATE PLANTING",
+    "Hills": "HILLS",
+    "CFITF_No": "CFITF No",
+    "RSBSA_No": "FARMER ID"
+  },
+  "transmittal_mapping": {
+    "Gender": "GENDER"
+  },
+  "transmittal_columns": [
+    {
+      "header": "FARMER NAME",
+      "enabled": true,
+      "order": 1
+    },
+    {
+      "header": "GENDER",
+      "enabled": true,
+      "order": 2
+    },
+    {
+      "header": "REGION",
+      "enabled": false,
+      "order": 3
+    },
+    {
+      "header": "FARMER ID",
+      "enabled": false,
+      "order": 4
+    },
+    {
+      "header": "CFITF No",
+      "enabled": true,
+      "order": 5
+    },
+    {
+      "header": "LOGBOOK",
+      "enabled": true,
+      "order": 6
+    },
+    {
+      "header": "RSBSA No.",
+      "enabled": false,
+      "order": 7
+    },
+    {
+      "header": "IP NO",
+      "enabled": false,
+      "order": 8
+    },
+    {
+      "header": "EFFECTIVITY DATE",
+      "enabled": false,
+      "order": 9
+    },
+    {
+      "header": "EXPIRY DATE",
+      "enabled": false,
+      "order": 10
+    },
+    {
+      "header": "PROGRAM TYPE",
+      "enabled": false,
+      "order": 11
+    },
+    {
+      "header": "OR NUMBER",
+      "enabled": false,
+      "order": 12
+    },
+    {
+      "header": "OR DATE",
+      "enabled": false,
+      "order": 13
+    },
+    {
+      "header": "OR AMOUNT",
+      "enabled": false,
+      "order": 14
+    },
+    {
+      "header": "LENDER NAME",
+      "enabled": false,
+      "order": 15
+    },
+    {
+      "header": "GROUP NAME",
+      "enabled": false,
+      "order": 16
+    },
+    {
+      "header": "DATE PLANTING",
+      "enabled": false,
+      "order": 17
+    },
+    {
+      "header": "DATE OF HARVEST",
+      "enabled": false,
+      "order": 18
+    },
+    {
+      "header": "VARIETY",
+      "enabled": false,
+      "order": 19
+    },
+    {
+      "header": "FARMID",
+      "enabled": false,
+      "order": 20
+    },
+    {
+      "header": "AREA",
+      "enabled": true,
+      "order": 21
+    },
+    {
+      "header": "HILLS",
+      "enabled": false,
+      "order": 22
+    },
+    {
+      "header": "FARM NAME",
+      "enabled": false,
+      "order": 23
+    },
+    {
+      "header": "GEOREF ID",
+      "enabled": false,
+      "order": 24
+    },
+    {
+      "header": "PROVINCE",
+      "enabled": false,
+      "order": 25
+    },
+    {
+      "header": "MUNICIPALITY",
+      "enabled": false,
+      "order": 26
+    },
+    {
+      "header": "BARANGAY",
+      "enabled": true,
+      "order": 27
+    },
+    {
+      "header": "NORTH",
+      "enabled": false,
+      "order": 28
+    },
+    {
+      "header": "EAST",
+      "enabled": false,
+      "order": 29
+    },
+    {
+      "header": "WEST",
+      "enabled": false,
+      "order": 30
+    },
+    {
+      "header": "SOUTH",
+      "enabled": false,
+      "order": 31
+    },
+    {
+      "header": "AMOUNT OF COVER",
+      "enabled": false,
+      "order": 32
+    },
+    {
+      "header": "PREMIUM",
+      "enabled": false,
+      "order": 33
+    },
+    {
+      "header": "PREMIUM TAX",
+      "enabled": false,
+      "order": 34
+    },
+    {
+      "header": "APPID",
+      "enabled": false,
+      "order": 35
+    },
+    {
+      "header": "PRODUCTION DATE",
+      "enabled": false,
+      "order": 36
+    }
+  ],
+  "updated_at": "2026-09-22T08:57:24.894863"
+}

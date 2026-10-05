@@ -167,6 +167,20 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('btn-reset-match').addEventListener('click', resetMappings);
         document.getElementById('btn-refresh-preview').addEventListener('click', () => reloadSamplePdfPreview(activePreviewType));
 
+        // Presets modal listeners
+        const btnPresets = document.getElementById('btn-saved-presets');
+        if (btnPresets) btnPresets.addEventListener('click', loadSavedPresets);
+        const btnClosePresets = document.getElementById('btn-close-presets-modal');
+        const modalBackdrop = document.getElementById('presets-modal-backdrop');
+        if (btnClosePresets) btnClosePresets.addEventListener('click', () => {
+            if (modalBackdrop) modalBackdrop.style.display = 'none';
+        });
+        if (modalBackdrop) {
+            modalBackdrop.addEventListener('click', (e) => {
+                if (e.target === modalBackdrop) modalBackdrop.style.display = 'none';
+            });
+        }
+
         // Process button
         document.getElementById('btn-start-process').addEventListener('click', startBatchStream);
         document.getElementById('btn-clear-logs').addEventListener('click', () => {
@@ -488,7 +502,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ columns: columns })
             })
             .then(res => res.json())
-            .then(() => {
+            .then((data) => {
+                if (data.active_profile) {
+                    workspace.active_mapping_profile = data.active_profile;
+                    updateMemoryIndicator();
+                }
                 const activeCount = columns.filter(c => c.enabled).length;
                 const badge = document.getElementById('tag-count-badge');
                 if (badge) badge.textContent = `${activeCount} of ${columns.length} Excel Columns Selected`;
@@ -527,6 +545,10 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .then(res => res.json())
             .then(data => {
+                if (data.active_profile) {
+                    workspace.active_mapping_profile = data.active_profile;
+                    updateMemoryIndicator();
+                }
                 reloadSamplePdfPreview(activePreviewType);
             });
         }, 300);
@@ -660,6 +682,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast(data.message, 'success');
                 workspace = data.workspace;
                 updateWorkspaceCards();
+                if (data.remembered_mapping) {
+                    const rm = data.remembered_mapping;
+                    const simPct = Math.round((rm.similarity || 1.0) * 100);
+                    showToast(`🧠 Automatically remembered mappings from "${rm.source_file}" (${simPct}% match)!`, 'success');
+                }
                 if (currentStep === 2) {
                     loadTagConnector(activePreviewType);
                 }
@@ -708,7 +735,144 @@ document.addEventListener('DOMContentLoaded', () => {
             statusTrans.classList.remove('loaded');
         }
 
+        updateMemoryIndicator();
         populateGroupingSelects();
+    }
+
+    function updateMemoryIndicator() {
+        const indicator = document.getElementById('mapping-memory-indicator');
+        const badgeText = document.getElementById('mapping-memory-text');
+        if (!indicator || !badgeText) return;
+
+        if (workspace.active_mapping_profile) {
+            const prof = workspace.active_mapping_profile;
+            const simPct = Math.round((prof.similarity || 1.0) * 100);
+            badgeText.textContent = `Remembered: ${prof.name} (${simPct}% match)`;
+            indicator.style.display = 'flex';
+        } else {
+            indicator.style.display = 'none';
+        }
+    }
+
+    function loadSavedPresets() {
+        const backdrop = document.getElementById('presets-modal-backdrop');
+        const container = document.getElementById('presets-list-container');
+        if (!backdrop || !container) return;
+
+        backdrop.style.display = 'flex';
+        container.innerHTML = '<p style="color:var(--text-muted); padding:1rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading saved presets...</p>';
+
+        fetch('/api/mappings/list')
+        .then(res => res.json())
+        .then(data => {
+            const profiles = data.profiles || [];
+            const activeProfile = data.active_profile;
+
+            if (profiles.length === 0) {
+                container.innerHTML = '<p style="color:var(--text-muted); padding:1rem;">No saved presets found yet. When you configure mappings, they are automatically saved here.</p>';
+                return;
+            }
+
+            container.innerHTML = '';
+            profiles.forEach(p => {
+                const card = document.createElement('div');
+                const isActive = activeProfile && activeProfile.id === p.id;
+                card.className = `preset-card ${isActive ? 'active-preset' : ''}`;
+
+                const sim = p.similarity || 0;
+                const simPct = Math.round(sim * 100);
+                let pillClass = 'low';
+                if (sim >= 0.8) pillClass = 'high';
+                else if (sim >= 0.5) pillClass = 'medium';
+
+                const dateStr = p.updated_at ? new Date(p.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+                const tplTagCount = Object.keys(p.template_mapping || {}).length;
+                const transColCount = (p.transmittal_columns || []).filter(c => c.enabled).length;
+
+                card.innerHTML = `
+                    <div class="preset-info">
+                        <div class="preset-title-row">
+                            <span class="preset-name">${p.name}</span>
+                            ${isActive ? '<span class="badge" style="background:rgba(59,130,246,0.2); color:#60a5fa; border:1px solid rgba(59,130,246,0.4);"><i class="fa-solid fa-check"></i> Active</span>' : ''}
+                            ${workspace.headers && workspace.headers.length > 0 ? `<span class="similarity-pill ${pillClass}">${simPct}% Match</span>` : ''}
+                        </div>
+                        <div class="preset-meta">
+                            <span><i class="fa-solid fa-file-excel"></i> ${p.source_file || 'Unknown'}</span>
+                            <span><i class="fa-solid fa-tags"></i> ${tplTagCount} Tags Mapped</span>
+                            <span><i class="fa-solid fa-table-columns"></i> ${transColCount} Transmittal Cols</span>
+                            ${dateStr ? `<span><i class="fa-regular fa-clock"></i> ${dateStr}</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="preset-actions">
+                        ${!isActive ? `<button type="button" class="btn btn-xs btn-primary btn-apply-preset" data-id="${p.id}"><i class="fa-solid fa-check"></i> Apply</button>` : ''}
+                        <button type="button" class="btn btn-xs btn-outline btn-delete-preset" data-id="${p.id}" title="Delete Preset"><i class="fa-solid fa-trash-can"></i></button>
+                    </div>
+                `;
+
+                const btnApply = card.querySelector('.btn-apply-preset');
+                if (btnApply) {
+                    btnApply.addEventListener('click', () => {
+                        applyPreset(p.id);
+                    });
+                }
+
+                const btnDelete = card.querySelector('.btn-delete-preset');
+                if (btnDelete) {
+                    btnDelete.addEventListener('click', () => {
+                        if (confirm(`Are you sure you want to delete the mapping preset "${p.name}"?`)) {
+                            deletePreset(p.id);
+                        }
+                    });
+                }
+
+                container.appendChild(card);
+            });
+        })
+        .catch(err => {
+            container.innerHTML = `<p style="color:var(--accent-red); padding:1rem;">Failed to load presets: ${err}</p>`;
+        });
+    }
+
+    function applyPreset(profileId) {
+        showToast("Applying mapping preset...", "info");
+        fetch('/api/mappings/apply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile_id: profileId })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                showToast(data.error, 'error');
+            } else {
+                showToast(data.message, 'success');
+                workspace.mappings = data.workspace.mappings;
+                workspace.transmittal_columns = data.workspace.transmittal_columns;
+                workspace.active_mapping_profile = data.active_profile;
+                updateMemoryIndicator();
+                loadTagConnector(activePreviewType);
+                loadSavedPresets();
+            }
+        })
+        .catch(err => showToast(`Failed to apply preset: ${err}`, 'error'));
+    }
+
+    function deletePreset(profileId) {
+        fetch('/api/mappings/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile_id: profileId })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                showToast(data.error, 'error');
+            } else {
+                showToast("Preset deleted", "info");
+                loadSavedPresets();
+            }
+        })
+        .catch(err => showToast(`Failed to delete preset: ${err}`, 'error'));
     }
 
     function populateGroupingSelects() {

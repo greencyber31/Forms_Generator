@@ -1,0 +1,228 @@
+{
+  "id": "cfitf_farmers_5a3c865f",
+  "name": "CFITF Standard Template",
+  "source_file": "CFITF_Farmers.xlsx",
+  "excel_headers": [
+    "Farmer ID",
+    "Reference No.",
+    "First Name",
+    "Middlename",
+    "Last Name",
+    "Suffix",
+    "Full Name",
+    "Region",
+    "Province",
+    "Municipality",
+    "Barangay",
+    "Birth Date",
+    "Gender",
+    "Civil Status",
+    "Educational Attainment",
+    "Contact No",
+    "Religion",
+    "Mother Fname",
+    "Mother Mname",
+    "Mother Lname",
+    "Mother Suffix",
+    "PWD",
+    "Disability",
+    "PWD Specify",
+    "Indi Member",
+    "Indi Group",
+    "Indi Specify",
+    "Tenurial Status",
+    "No of Farms",
+    "Coconutarea",
+    "Year Started in Cocofarming"
+  ],
+  "template_mapping": {
+    "RSBSA_No": "Farmer ID",
+    "PB_Bday": "Birth Date",
+    "PB_Rel": "Civil Status",
+    "Last_Name": "Last Name",
+    "Middle_Name": "Middlename",
+    "Home_Barangay": "Barangay",
+    "Suffix": "Suffix",
+    "Farm_Barangay": "Barangay",
+    "Home_Province": "Province",
+    "Home_Municipality": "Municipality",
+    "CFITF_No": "Reference No.",
+    "Farm_Municipality": "Municipality",
+    "PBene_Suffix": "Suffix",
+    "PBene_First_Name": "First Name",
+    "Contact_Number": "Contact No",
+    "Civil_Status": "Civil Status",
+    "Farm_Province": "Province",
+    "Gender": "Gender",
+    "First_Name": "First Name",
+    "PBene_Middle_Name": "Middlename",
+    "Birthdate": "Birth Date",
+    "Area": "Coconutarea",
+    "PBene_Last_Name": "Last Name"
+  },
+  "transmittal_mapping": {
+    "Gender": "Gender",
+    "First_Name": "First Name",
+    "Reference_No": "Reference No.",
+    "Last_Name": "Last Name",
+    "Middle_Name": "Middlename"
+  },
+  "transmittal_columns": [
+    {
+      "enabled": false,
+      "header": "Last Name",
+      "order": 1
+    },
+    {
+      "enabled": true,
+      "header": "First Name",
+      "order": 1
+    },
+    {
+      "enabled": true,
+      "header": "Middlename",
+      "order": 3
+    },
+    {
+      "enabled": true,
+      "header": "Birth Date",
+      "order": 4
+    },
+    {
+      "enabled": true,
+      "header": "Gender",
+      "order": 5
+    },
+    {
+      "enabled": true,
+      "header": "Farmer ID",
+      "order": 6
+    },
+    {
+      "enabled": false,
+      "header": "Reference No.",
+      "order": 7
+    },
+    {
+      "enabled": false,
+      "header": "Suffix",
+      "order": 8
+    },
+    {
+      "enabled": false,
+      "header": "Full Name",
+      "order": 9
+    },
+    {
+      "enabled": false,
+      "header": "Region",
+      "order": 10
+    },
+    {
+      "enabled": false,
+      "header": "Province",
+      "order": 11
+    },
+    {
+      "enabled": false,
+      "header": "Municipality",
+      "order": 12
+    },
+    {
+      "enabled": false,
+      "header": "Barangay",
+      "order": 13
+    },
+    {
+      "enabled": false,
+      "header": "Civil Status",
+      "order": 14
+    },
+    {
+      "enabled": false,
+      "header": "Educational Attainment",
+      "order": 15
+    },
+    {
+      "enabled": false,
+      "header": "Contact No",
+      "order": 16
+    },
+    {
+      "enabled": false,
+      "header": "Religion",
+      "order": 17
+    },
+    {
+      "enabled": false,
+      "header": "Mother Fname",
+      "order": 18
+    },
+    {
+      "enabled": false,
+      "header": "Mother Mname",
+      "order": 19
+    },
+    {
+      "enabled": false,
+      "header": "Mother Lname",
+      "order": 20
+    },
+    {
+      "enabled": false,
+      "header": "Mother Suffix",
+      "order": 21
+    },
+    {
+      "enabled": false,
+      "header": "PWD",
+      "order": 22
+    },
+    {
+      "enabled": false,
+      "header": "Disability",
+      "order": 23
+    },
+    {
+      "enabled": false,
+      "header": "PWD Specify",
+      "order": 24
+    },
+    {
+      "enabled": false,
+      "header": "Indi Member",
+      "order": 25
+    },
+    {
+      "enabled": false,
+      "header": "Indi Group",
+      "order": 26
+    },
+    {
+      "enabled": false,
+      "header": "Indi Specify",
+      "order": 27
+    },
+    {
+      "enabled": false,
+      "header": "Tenurial Status",
+      "order": 28
+    },
+    {
+      "enabled": false,
+      "header": "No of Farms",
+      "order": 29
+    },
+    {
+      "enabled": false,
+      "header": "Coconutarea",
+      "order": 30
+    },
+    {
+      "enabled": false,
+      "header": "Year Started in Cocofarming",
+      "order": 31
+    }
+  ],
+  "updated_at": "2026-09-14T16:34:03.641295"
+}

@@ -156,6 +156,9 @@
                                 </button>
                             </div>
                             <div class="mapping-actions">
+                                <button class="btn btn-sm btn-outline" id="btn-saved-presets" title="View or Switch Saved Mappings">
+                                    <i class="fa-solid fa-clock-rotate-left"></i> Saved Presets
+                                </button>
                                 <button class="btn btn-sm btn-accent" id="btn-auto-match">
                                     <i class="fa-solid fa-bolt"></i> Auto-Match Tags
                                 </button>
@@ -167,8 +170,15 @@
 
                         <!-- Detected Tags Summary Bar -->
                         <div class="detected-tags-bar">
-                            <span><i class="fa-solid fa-tags"></i> Scanned Word Tags:</span>
-                            <span class="badge" id="tag-count-badge">0 Tags Detected</span>
+                            <div class="tags-bar-left">
+                                <span><i class="fa-solid fa-tags"></i> Scanned Word Tags:</span>
+                                <span class="badge" id="tag-count-badge">0 Tags Detected</span>
+                            </div>
+                            <div class="tags-bar-right" id="mapping-memory-indicator" style="display: none;">
+                                <span class="memory-badge" id="mapping-memory-badge" title="Automatically remembered from previous similar upload">
+                                    <i class="fa-solid fa-brain"></i> <span id="mapping-memory-text">Remembered Mapping</span>
+                                </span>
+                            </div>
                         </div>
 
                         <!-- Mapping Rows Container -->
@@ -448,6 +458,28 @@
             </div> <!-- End of #pdf-viewer-view -->
 
         </main>
+    </div>
+
+    <!-- Saved Presets Modal -->
+    <div class="modal-backdrop" id="presets-modal-backdrop" style="display: none;">
+        <div class="modal-card presets-modal-card">
+            <div class="modal-header">
+                <div class="modal-title-box">
+                    <div class="modal-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
+                    <div>
+                        <h3>Saved Mapping Presets</h3>
+                        <p>Auto-remembered field connections and transmittal tables</p>
+                    </div>
+                </div>
+                <button type="button" class="btn-close-modal" id="btn-close-presets-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc">Field mappings and transmittal columns are automatically remembered when similar Excel files are uploaded. You can also manually switch to or delete saved presets below.</p>
+                <div class="presets-list" id="presets-list-container">
+                    <p style="color:var(--text-muted); padding:1rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading saved presets...</p>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Notification Toast Container -->

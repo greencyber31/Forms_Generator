@@ -1,0 +1,81 @@
+{
+  "id": "ncfrs_detailed_lists_cabanglasan_san_fernando_and_malaybalay_62f907ce",
+  "name": "NCFRS_Detailed_Lists_Cabanglasan_San_Fernando_and_Malaybalay.xlsx",
+  "source_file": "NCFRS_Detailed_Lists_Cabanglasan_San_Fernando_and_Malaybalay.xlsx",
+  "excel_headers": [
+    "Reference No",
+    "FULL NAME",
+    "Province",
+    "Municipality",
+    "Barangay",
+    "Birth Date",
+    "Gender",
+    "Insurance Status"
+  ],
+  "template_mapping": {
+    "LOGBOOK": "STATIC:New Farmer",
+    "Crop": "STATIC:COCONUT",
+    "Last_Name": "FULL NAME",
+    "Home_Barangay": "Barangay",
+    "Home_Municipality": "Municipality",
+    "Home_Province": "Province",
+    "Birthdate": "Birth Date",
+    "Gender": "Gender",
+    "PBene_Last_Name": "__BLANK_UNDERLINE__",
+    "PBene_First_Name": "__BLANK_UNDERLINE__",
+    "PBene_Middle_Name": "__BLANK_UNDERLINE__",
+    "PBene_Suffix": "__BLANK_UNDERLINE__",
+    "PB_Bday": "Birth Date",
+    "Farm_Barangay": "Barangay",
+    "Farm_Municipality": "Municipality",
+    "Farm_Province": "Province",
+    "CFITF_No": "Reference No"
+  },
+  "transmittal_mapping": {
+    "Gender": "Gender",
+    "Reference_No": "Reference No"
+  },
+  "transmittal_columns": [
+    {
+      "header": "FULL NAME",
+      "enabled": true,
+      "order": 1
+    },
+    {
+      "header": "Birth Date",
+      "enabled": true,
+      "order": 2
+    },
+    {
+      "header": "Gender",
+      "enabled": true,
+      "order": 3
+    },
+    {
+      "header": "Reference No",
+      "enabled": true,
+      "order": 4
+    },
+    {
+      "header": "Province",
+      "enabled": false,
+      "order": 5
+    },
+    {
+      "header": "Municipality",
+      "enabled": false,
+      "order": 6
+    },
+    {
+      "header": "Barangay",
+      "enabled": true,
+      "order": 7
+    },
+    {
+      "header": "Insurance Status",
+      "enabled": false,
+      "order": 8
+    }
+  ],
+  "updated_at": "2026-09-15T08:23:41.502652"
+}
